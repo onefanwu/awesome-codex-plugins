@@ -365,10 +365,10 @@
       "category": "Tools & Integrations"
     },
     {
-      "name": "ru-text",
+      "name": "remotion",
       "source": {
         "source": "local",
-        "path": "./plugins/talkstream/ru-text"
+        "path": "./plugins/tim-osterhus/codex-remotion-plugin"
       },
       "policy": {
         "installation": "AVAILABLE",
@@ -377,10 +377,10 @@
       "category": "Tools & Integrations"
     },
     {
-      "name": "remotion",
+      "name": "ru-text",
       "source": {
         "source": "local",
-        "path": "./plugins/tim-osterhus/codex-remotion-plugin"
+        "path": "./plugins/talkstream/ru-text"
       },
       "policy": {
         "installation": "AVAILABLE",
