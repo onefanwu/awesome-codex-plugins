@@ -29,7 +29,7 @@
       "category": "Development & Workflow"
     },
     {
-      "name": "bp",
+      "name": "ck",
       "source": {
         "source": "local",
         "path": "./plugins/JuliusBrussee/blueprint"
@@ -405,6 +405,18 @@
       "source": {
         "source": "local",
         "path": "./plugins/talkstream/ru-text"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations"
+    },
+    {
+      "name": "sitemd",
+      "source": {
+        "source": "local",
+        "path": "./plugins/sitemd-cc/sitemd"
       },
       "policy": {
         "installation": "AVAILABLE",

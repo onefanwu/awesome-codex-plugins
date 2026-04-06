@@ -33,6 +33,7 @@ class AnalysisContext:
     ref_pins: dict[str, dict[str, tuple[str | None, str | None]]] = field(default_factory=dict)
     no_connects: list[dict] = field(default_factory=list)
     generator_version: str = "unknown"
+    nq: 'NetlistQueries | None' = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if not self.comp_lookup:
@@ -63,4 +64,11 @@ class AnalysisContext:
     def get_two_pin_nets(self, ref: str) -> tuple[str | None, str | None]:
         n1, _ = self.pin_net.get((ref, "1"), (None, None))
         n2, _ = self.pin_net.get((ref, "2"), (None, None))
+        if n1 is not None and n2 is not None:
+            return n1, n2
+        # Fallback for non-"1"/"2" pin numbering (Eagle imports, diodes A/K, etc.)
+        pins = self.ref_pins.get(ref, {})
+        if len(pins) == 2:
+            nets = [net for net, _ in pins.values()]
+            return nets[0], nets[1]
         return n1, n2
