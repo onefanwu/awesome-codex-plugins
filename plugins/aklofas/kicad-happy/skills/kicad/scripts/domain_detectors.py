@@ -10,10 +10,12 @@ Each detector takes an AnalysisContext (ctx) and returns its detection results.
 """
 
 import re
+from collections import Counter
 
 from kicad_types import AnalysisContext
 from kicad_utils import lookup_regulator_vref, parse_value, parse_voltage_from_net_name
 from signal_detectors import _get_net_components
+from detector_helpers import get_components_by_type, index_two_pin_components, match_ic_keywords
 
 
 def detect_buzzer_speakers(ctx: AnalysisContext, transistor_circuits: list[dict]) -> list[dict]:
@@ -188,7 +190,6 @@ def detect_key_matrices(ctx: AnalysisContext) -> list[dict]:
                 # KH-197c: Resolve ambiguous nets that appear in both sets
                 ambiguous = topo_row_nets & topo_col_nets
                 if ambiguous:
-                    from collections import Counter
                     row_votes = Counter(p["row_net"] for p in switch_diode_pairs)
                     col_votes = Counter(p["col_net"] for p in switch_diode_pairs)
                     for net in ambiguous:
@@ -466,6 +467,64 @@ def detect_ethernet_interfaces(ctx: AnalysisContext) -> list[dict]:
             if not found_connectors:
                 found_connectors = eth_connectors
 
+            # Bob Smith termination: ~75Ω from transformer center tap via cap to chassis GND
+            # Reduces common-mode noise on Ethernet cable for EMC compliance
+            bob_smith = None
+            for mag in found_magnetics:
+                if bob_smith:
+                    break
+                mag_ref = mag["reference"]
+                # Check all nets this transformer connects to
+                for (ref, pnum), (net_name, _) in ctx.pin_net.items():
+                    if ref != mag_ref or not net_name:
+                        continue
+                    if ctx.is_power_net(net_name) or ctx.is_ground(net_name):
+                        continue
+                    if net_name not in ctx.nets:
+                        continue
+                    # Look for a ~75Ω resistor on this net
+                    for p in ctx.nets[net_name]["pins"]:
+                        rc = ctx.comp_lookup.get(p["component"])
+                        if not rc or rc["type"] != "resistor":
+                            continue
+                        r_val = ctx.parsed_values.get(p["component"])
+                        if not r_val or not (60 <= r_val <= 100):  # 75Ω ±33%
+                            continue
+                        # Check if the other end goes to ground (direct or via cap)
+                        rn1, rn2 = ctx.get_two_pin_nets(p["component"])
+                        r_other = rn2 if rn1 == net_name else rn1
+                        if not r_other:
+                            continue
+                        if ctx.is_ground(r_other):
+                            bob_smith = {
+                                "resistor_ref": p["component"],
+                                "resistor_value": rc.get("value", ""),
+                                "ohms": r_val,
+                                "transformer_ref": mag_ref,
+                            }
+                            break
+                        # Check for cap in between (R → cap → GND)
+                        if r_other in ctx.nets:
+                            for cp in ctx.nets[r_other]["pins"]:
+                                cc = ctx.comp_lookup.get(cp["component"])
+                                if cc and cc["type"] == "capacitor":
+                                    cn1, cn2 = ctx.get_two_pin_nets(cp["component"])
+                                    c_other = cn2 if cn1 == r_other else cn1
+                                    if c_other and ctx.is_ground(c_other):
+                                        bob_smith = {
+                                            "resistor_ref": p["component"],
+                                            "resistor_value": rc.get("value", ""),
+                                            "ohms": r_val,
+                                            "cap_ref": cp["component"],
+                                            "cap_value": cc.get("value", ""),
+                                            "transformer_ref": mag_ref,
+                                        }
+                                        break
+                        if bob_smith:
+                            break
+                    if bob_smith:
+                        break
+
             ethernet_interfaces.append({
                 "phy_reference": phy["reference"],
                 "phy_value": phy["value"],
@@ -478,6 +537,7 @@ def detect_ethernet_interfaces(ctx: AnalysisContext) -> list[dict]:
                     {"reference": c["reference"], "value": c["value"]}
                     for c in found_connectors
                 ],
+                "bob_smith_termination": bob_smith,
             })
     return ethernet_interfaces
 
@@ -2425,6 +2485,89 @@ def detect_power_path(ctx: AnalysisContext) -> list[dict]:
             entry["vbus_net"] = vbus_net
             entry["cc_nets"] = cc_nets
             entry["sbu_nets"] = sbu_nets
+
+            # USB-C CC resistor validation
+            # UFP (sink) requires 5.1kΩ ±10% pull-down on each CC pin to GND
+            # DFP (source) uses 56kΩ (default USB), 22kΩ (1.5A), or 10kΩ (3A)
+            # PD controller IC on CC nets means discrete resistors not required
+            cc_resistor_findings = []
+            has_pd_controller = bool(entry.get("pd_controller"))
+
+            if cc_nets and not has_pd_controller:
+                for cc_net in cc_nets:
+                    if cc_net not in ctx.nets:
+                        continue
+                    cc_resistors = []
+                    for pin in ctx.nets[cc_net].get("pins", []):
+                        comp = ctx.comp_lookup.get(pin["component"])
+                        if not comp or comp["type"] != "resistor":
+                            continue
+                        r_val = ctx.parsed_values.get(pin["component"])
+                        if r_val is None:
+                            continue
+                        # Check which net the other pin connects to
+                        n1, n2 = ctx.get_two_pin_nets(pin["component"])
+                        other_net = n2 if n1 == cc_net else n1
+                        if other_net and ctx.is_ground(other_net):
+                            cc_resistors.append({
+                                "ref": pin["component"],
+                                "ohms": r_val,
+                                "value": comp.get("value", ""),
+                                "to_net": other_net,
+                            })
+
+                    if not cc_resistors:
+                        cc_resistor_findings.append({
+                            "net": cc_net,
+                            "status": "missing",
+                            "message": f"No pull-down resistor on {cc_net} — "
+                                       f"required for USB-C sink (UFP) role",
+                        })
+                    else:
+                        for cr in cc_resistors:
+                            r = cr["ohms"]
+                            # 5.1kΩ ±10% for sink (UFP)
+                            if 4590 <= r <= 5610:
+                                cc_resistor_findings.append({
+                                    "net": cc_net,
+                                    "ref": cr["ref"],
+                                    "ohms": r,
+                                    "status": "correct_sink",
+                                    "message": f"{cr['ref']} ({cr['value']}) on {cc_net} — "
+                                               f"correct for UFP/sink role",
+                                })
+                            elif 50400 <= r <= 61600:  # 56kΩ ±10% = default USB
+                                cc_resistor_findings.append({
+                                    "net": cc_net, "ref": cr["ref"], "ohms": r,
+                                    "status": "source_default",
+                                    "message": f"{cr['ref']} ({cr['value']}) — "
+                                               f"DFP source, default USB current",
+                                })
+                            elif 19800 <= r <= 24200:  # 22kΩ ±10% = 1.5A
+                                cc_resistor_findings.append({
+                                    "net": cc_net, "ref": cr["ref"], "ohms": r,
+                                    "status": "source_1_5A",
+                                    "message": f"{cr['ref']} ({cr['value']}) — "
+                                               f"DFP source, 1.5A advertisement",
+                                })
+                            elif 9000 <= r <= 11000:  # 10kΩ ±10% = 3A
+                                cc_resistor_findings.append({
+                                    "net": cc_net, "ref": cr["ref"], "ohms": r,
+                                    "status": "source_3A",
+                                    "message": f"{cr['ref']} ({cr['value']}) — "
+                                               f"DFP source, 3A advertisement",
+                                })
+                            else:
+                                cc_resistor_findings.append({
+                                    "net": cc_net, "ref": cr["ref"], "ohms": r,
+                                    "status": "unexpected_value",
+                                    "message": f"{cr['ref']} ({cr['value']}) = {r:.0f}Ω on {cc_net} — "
+                                               f"not a standard USB-C CC value "
+                                               f"(expected 5.1kΩ sink or 56k/22k/10k source)",
+                                })
+
+            if cc_resistor_findings:
+                entry["cc_resistor_check"] = cc_resistor_findings
 
         results.append(entry)
 
