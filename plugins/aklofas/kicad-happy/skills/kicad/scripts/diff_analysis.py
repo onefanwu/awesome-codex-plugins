@@ -18,6 +18,7 @@ Zero dependencies — Python 3.8+ stdlib only.
 
 import argparse
 import json
+import os
 import sys
 
 
@@ -28,40 +29,26 @@ import sys
 # identity_fields: dotpath fields that uniquely identify a detection
 # value_fields: numeric/string fields to compare for changes
 
-SIGNAL_REGISTRY = {
-    "voltage_dividers": (["r_top.ref", "r_bottom.ref"], ["ratio", "vout_estimated"]),
-    "rc_filters": (["resistor.ref", "capacitor.ref"], ["cutoff_hz"]),
-    "lc_filters": (["inductor.ref", "capacitor.ref"], ["resonant_hz"]),
-    "power_regulators": (["ref"], ["vout_estimated", "topology"]),
-    "opamp_circuits": (["reference"], ["gain", "gain_dB", "configuration"]),
-    "crystal_circuits": (["reference"], ["frequency", "effective_load_pF"]),
-    "transistor_circuits": (["reference"], ["type"]),
-    "protection_devices": (["reference", "type"], ["protected_net"]),
-    "current_sense": (["shunt.ref"], ["max_current_50mV_A", "max_current_100mV_A"]),
-    "feedback_networks": (["r_top.ref", "r_bottom.ref"], ["ratio"]),
-    "bridge_circuits": (["topology"], []),
-    "rf_matching": (["antenna_ref"], []),
-    "bms_systems": (["bms_reference"], ["cell_count"]),
-    "decoupling_analysis": (["rail_net"], []),
-    "rf_chains": ([], []),
-    "ethernet_interfaces": (["phy_ref"], []),
-    "memory_interfaces": (["type"], []),
-    "isolation_barriers": (["isolator_ref"], []),
-}
+from detection_schema import SCHEMAS as _SCHEMAS
+from finding_schema import group_findings_legacy
+
+# SIGNAL_REGISTRY is derived from the unified detection schema.
+# Kept as a module-level name for backward compat (validate_signal_registry, _diff_items).
+SIGNAL_REGISTRY = {dt: (s.identity_fields, s.value_fields) for dt, s in _SCHEMAS.items()}
 
 
 def validate_signal_registry(sample_output: dict) -> list[str]:
     """Check SIGNAL_REGISTRY keys exist in a sample analyzer output.
 
     Returns list of warning strings for any registered detection type
-    whose key is not found under ``signal_analysis`` in the sample output.
+    whose key is not found in the findings of the sample output.
     Useful for catching stale registry entries after schema changes.
     """
-    sa = sample_output.get("signal_analysis", {})
+    sa = group_findings_legacy(sample_output)
     warnings = []
     for key in SIGNAL_REGISTRY:
         if key not in sa:
-            warnings.append(f"SIGNAL_REGISTRY key '{key}' not in signal_analysis")
+            warnings.append(f"SIGNAL_REGISTRY key '{key}' not in findings")
     return warnings
 
 
@@ -140,22 +127,26 @@ def _diff_lists(base_items, head_items, id_fields, value_fields, threshold):
     if not isinstance(head_items, list):
         head_items = []
 
+    def _get_key(item):
+        did = item.get("detection_id") if isinstance(item, dict) else None
+        if did:
+            return did
+        if id_fields:
+            key = _identity_key(item, id_fields)
+            if key:
+                return key
+        return _generic_identity(item)
+
     # Build identity maps
     base_map = {}
     for item in base_items:
-        if id_fields:
-            key = _identity_key(item, id_fields)
-        else:
-            key = _generic_identity(item)
+        key = _get_key(item)
         if key:
             base_map[key] = item
 
     head_map = {}
     for item in head_items:
-        if id_fields:
-            key = _identity_key(item, id_fields)
-        else:
-            key = _generic_identity(item)
+        key = _get_key(item)
         if key:
             head_map[key] = item
 
@@ -169,6 +160,8 @@ def _diff_lists(base_items, head_items, id_fields, value_fields, threshold):
                 result["modified"].append({
                     "identity": key.replace("::", "/"),
                     "changes": changes,
+                    "base_item": base_map[key],
+                    "head_item": item,
                 })
             else:
                 result["unchanged_count"] += 1
@@ -244,7 +237,7 @@ def detect_type(data):
     if at:
         return at
     # Fallback heuristic for older JSON files
-    if "signal_analysis" in data:
+    if "findings" in data and "components" in data:
         return "schematic"
     if "footprints" in data and "tracks" in data:
         return "pcb"
@@ -253,6 +246,9 @@ def detect_type(data):
         return "emc"
     if "simulation_results" in data:
         return "spice"
+    # Detect pre-v1.3 schematic format (signal_analysis wrapper, no findings[])
+    if "signal_analysis" in data and "components" in data:
+        return "schematic_old"
     return None
 
 
@@ -309,9 +305,9 @@ def diff_schematic(base, head, threshold):
     if comp_diff["added"] or comp_diff["removed"] or comp_diff["modified"]:
         result["components"] = comp_diff
 
-    # Signal analysis
-    base_sa = base.get("signal_analysis", {})
-    head_sa = head.get("signal_analysis", {})
+    # Signal analysis (grouped from flat findings[])
+    base_sa = group_findings_legacy(base)
+    head_sa = group_findings_legacy(head)
     all_keys = set(list(base_sa.keys()) + list(head_sa.keys()))
     sa_diff = {}
 
@@ -330,6 +326,39 @@ def diff_schematic(base, head, threshold):
 
     if sa_diff:
         result["signal_analysis"] = sa_diff
+
+    # Attribution: correlate signal changes with component changes
+    if "signal_analysis" in result and "components" in result:
+        comp_changes = {}
+        for m in result["components"].get("modified", []):
+            for ch in m.get("changes", []):
+                if ch["field"] == "value":
+                    comp_changes[m["reference"]] = {
+                        "base_value": ch["base"], "head_value": ch["head"]}
+
+        if comp_changes:
+            for det_type, det_diff in result.get("signal_analysis", {}).items():
+                for mod in det_diff.get("modified", []):
+                    # Find changed components referenced in this detection
+                    attributed = []
+                    # Check identity string for component refs
+                    identity = mod.get("identity", "")
+                    for ref in comp_changes:
+                        if ref in identity:
+                            attributed.append(ref)
+                    # Also check the items themselves if available
+                    for item_key in ("base_item", "head_item"):
+                        item = mod.get(item_key, {})
+                        if isinstance(item, dict):
+                            for key, val in item.items():
+                                if isinstance(val, dict) and "ref" in val:
+                                    r = val["ref"]
+                                    if r in comp_changes and r not in attributed:
+                                        attributed.append(r)
+                    if attributed:
+                        mod["attributed_to"] = [
+                            {"ref": ref, **comp_changes[ref]} for ref in sorted(attributed)
+                        ]
 
     # BOM changes
     base_bom = {(b.get("value", ""), b.get("footprint", "")): b
@@ -710,6 +739,94 @@ def classify_severity(analyzer_type, diff_result):
     return "none"
 
 
+def classify_regressions(analyzer_type, diff_result):
+    """Identify specific regressions in the diff.
+
+    Returns list of {category, severity, detail} for changes that
+    made the design worse.
+    """
+    regressions = []
+
+    if analyzer_type == "schematic":
+        # New ERC warnings
+        for w in diff_result.get("erc", {}).get("new_warnings", []):
+            regressions.append({
+                "category": "erc",
+                "severity": "breaking",
+                "detail": f"New ERC warning: {w.get('type', '?')} on {w.get('net', '?')}",
+            })
+        # New connectivity issues
+        for issue_type in ("single_pin_nets", "floating_nets", "multi_driver_nets"):
+            conn = diff_result.get("connectivity", {}).get(issue_type, {})
+            new_items = conn.get("new", [])
+            for item in new_items:
+                detail = item if isinstance(item, str) else str(item)
+                regressions.append({
+                    "category": "connectivity",
+                    "severity": "major",
+                    "detail": f"New {issue_type.replace('_', ' ')}: {detail}",
+                })
+        # Removed protection devices
+        for p in diff_result.get("signal_analysis", {}).get("protection_devices", {}).get("removed", []):
+            ident = p.get("identity", p.get("reference", "?"))
+            regressions.append({
+                "category": "protection",
+                "severity": "major",
+                "detail": f"Protection device removed: {ident}",
+            })
+
+    elif analyzer_type == "emc":
+        # New critical/high findings
+        for f in diff_result.get("findings", {}).get("new", []):
+            sev = f.get("severity", "").upper()
+            if sev in ("CRITICAL", "HIGH"):
+                regressions.append({
+                    "category": "emc",
+                    "severity": "breaking" if sev == "CRITICAL" else "major",
+                    "detail": f"New EMC finding: {f.get('rule_id', '?')} ({sev})",
+                })
+        # Risk score increase
+        risk = diff_result.get("risk_score", {})
+        if isinstance(risk, dict) and risk.get("delta", 0) > 0:
+            regressions.append({
+                "category": "emc_risk",
+                "severity": "major",
+                "detail": f"EMC risk score increased: {risk.get('base', '?')} \u2192 {risk.get('head', '?')}",
+            })
+
+    elif analyzer_type == "spice":
+        # Pass -> fail transitions
+        for sc in diff_result.get("status_changes", []):
+            if sc.get("base_status") == "pass" and sc.get("head_status") == "fail":
+                regressions.append({
+                    "category": "spice",
+                    "severity": "breaking",
+                    "detail": f"SPICE regression: {sc.get('subcircuit_type', '?')} pass\u2192fail",
+                })
+
+    elif analyzer_type == "pcb":
+        # Unrouted count increase
+        stats = diff_result.get("statistics", {})
+        for path, info in stats.items():
+            if "unrouted" in path and isinstance(info, dict) and info.get("delta", 0) > 0:
+                regressions.append({
+                    "category": "routing",
+                    "severity": "major",
+                    "detail": f"Unrouted nets increased: {info.get('base', 0)} \u2192 {info.get('head', 0)}",
+                })
+        # Also check dedicated unrouted field
+        unrouted = diff_result.get("unrouted", {})
+        for path, info in unrouted.items():
+            if isinstance(info, dict) and info.get("delta", 0) > 0:
+                regressions.append({
+                    "category": "routing",
+                    "severity": "major",
+                    "detail": f"Unrouted nets increased: {info.get('base', 0)} \u2192 {info.get('head', 0)}",
+                })
+
+    return regressions
+
+
 # ---------------------------------------------------------------------------
 # Summary builder
 # ---------------------------------------------------------------------------
@@ -775,12 +892,22 @@ def format_text(output):
     total = summary.get("total_changes", 0)
 
     lines.append(f"Design Changes: {atype} ({severity}) — {total} changes")
-    if total == 0:
+
+    regressions = output.get("regressions", [])
+
+    if total == 0 and not regressions:
         lines.append("  No changes detected.")
         return "\n".join(lines)
 
     s = summary
     lines.append(f"  +{s['added']} added, -{s['removed']} removed, ~{s['modified']} modified")
+
+    if regressions:
+        lines.append("")
+        lines.append(f"\u26a0 {len(regressions)} regression(s) detected:")
+        for r in regressions:
+            lines.append(f"  [{r['severity'].upper()}] {r['detail']}")
+
     lines.append("")
 
     diff = output.get("diff", {})
@@ -824,6 +951,11 @@ def format_text(output):
                     for ch in item.get("changes", [])
                 )
                 lines.append(f"  ~ {label} {identity}: {changes}")
+                attr = item.get("attributed_to", [])
+                if attr:
+                    causes = ", ".join(
+                        f"{a['ref']} {a['base_value']}\u2192{a['head_value']}" for a in attr)
+                    lines.append(f"      caused by: {causes}")
                 shown += 1
             if shown >= MAX_TEXT_ITEMS:
                 break
@@ -881,6 +1013,90 @@ def format_text(output):
 
 
 # ---------------------------------------------------------------------------
+# Multi-run trend extraction
+# ---------------------------------------------------------------------------
+
+def _extract_trends(analysis_dir, output_type, n_runs):
+    """Extract metric values across the last N runs.
+
+    Returns {det_type: {identity: {field: [(run_id, value), ...]}}}
+    """
+    from analysis_cache import list_runs, CANONICAL_OUTPUTS
+
+    runs = list_runs(analysis_dir, limit=n_runs)
+    if len(runs) < 2:
+        return {}
+
+    filename = CANONICAL_OUTPUTS.get(output_type, f"{output_type}.json")
+    trends = {}
+
+    for run_id, _meta in runs:
+        path = os.path.join(analysis_dir, run_id, filename)
+        if not os.path.isfile(path):
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+        sa = group_findings_legacy(data)
+        for det_type, detections in sa.items():
+            if not isinstance(detections, list):
+                continue
+            if det_type not in SIGNAL_REGISTRY:
+                continue
+            id_fields, val_fields = SIGNAL_REGISTRY[det_type]
+            for det in detections:
+                key = _identity_key(det, id_fields)
+                if not key:
+                    key = _generic_identity(det)
+                if not key:
+                    continue
+                bucket = trends.setdefault(det_type, {}).setdefault(key, {})
+                for field in val_fields:
+                    val = _resolve(det, field)
+                    if isinstance(val, (int, float)):
+                        bucket.setdefault(field, []).append((run_id, val))
+
+    return trends
+
+
+def _format_trends(trends, n_runs):
+    """Format trend data as human-readable text."""
+    lines = []
+    lines.append(f"Metric Trends (last {n_runs} runs)")
+    lines.append("")
+
+    if not trends:
+        lines.append("  No tracked metrics found across runs.")
+        return "\n".join(lines)
+
+    for det_type in sorted(trends):
+        lines.append(f"  {det_type}:")
+        for identity in sorted(trends[det_type]):
+            fields = trends[det_type][identity]
+            for field, datapoints in sorted(fields.items()):
+                if len(datapoints) < 2:
+                    continue
+                # Reverse to chronological (list_runs returns newest-first)
+                datapoints = list(reversed(datapoints))
+                vals = [f"{v:.4g}" for _, v in datapoints]
+                first_val = datapoints[0][1]
+                last_val = datapoints[-1][1]
+                val_chain = " \u2192 ".join(vals)
+                if first_val != 0:
+                    pct = (last_val - first_val) / abs(first_val) * 100
+                    arrow = "\u2191" if pct > 1 else "\u2193" if pct < -1 else "\u2192"
+                    lines.append(f"    {identity} {field}: {val_chain} ({arrow}{abs(pct):.1f}%)")
+                else:
+                    lines.append(f"    {identity} {field}: {val_chain}")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -888,13 +1104,102 @@ def main():
     parser = argparse.ArgumentParser(
         description="Compare two KiCad analysis JSON files and report changes"
     )
-    parser.add_argument("base", help="Path to base (old) analysis JSON")
-    parser.add_argument("head", help="Path to head (new) analysis JSON")
+    parser.add_argument("base", nargs="?", help="Path to base (old) analysis JSON")
+    parser.add_argument("head", nargs="?", help="Path to head (new) analysis JSON")
+    parser.add_argument("--analysis-dir", "-d",
+                        help="Analysis directory — auto-resolve runs from manifest")
+    parser.add_argument("--run", action="append", default=[],
+                        help="Run ID to compare (use twice: --run OLD --run NEW). "
+                             "Special: 'current', 'previous', or YYYY-MM-DD_HHMM")
+    parser.add_argument("--type", dest="output_type",
+                        help="Output type to diff (schematic, pcb, emc, spice). "
+                             "Default: auto-detect first common output")
     parser.add_argument("--output", "-o", help="Write output JSON to file (default: stdout)")
     parser.add_argument("--text", action="store_true", help="Output human-readable text instead of JSON")
     parser.add_argument("--threshold", type=float, default=1.0,
                         help="Ignore numeric deltas below this percentage (default: 1.0%%)")
+    parser.add_argument("--trend", type=int, metavar="N",
+                        help="Show metric trends across last N runs (requires --analysis-dir)")
     args = parser.parse_args()
+
+    # Resolve runs from analysis cache if --analysis-dir is provided
+    if args.analysis_dir:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from analysis_cache import list_runs, CANONICAL_OUTPUTS
+
+        analysis_dir = args.analysis_dir
+        if not os.path.isdir(analysis_dir):
+            print(f"Error: analysis directory not found: {analysis_dir}", file=sys.stderr)
+            sys.exit(1)
+
+        # Determine which runs to compare
+        if len(args.run) == 2:
+            run_ids = args.run
+        elif len(args.run) == 1:
+            run_ids = [args.run[0], "current"]
+        else:
+            run_ids = ["previous", "current"]
+
+        # Resolve special names
+        all_runs = list_runs(analysis_dir)
+        if not all_runs:
+            print("Error: no runs found in analysis directory", file=sys.stderr)
+            sys.exit(1)
+
+        resolved = []
+        for rid in run_ids:
+            if rid == "current":
+                resolved.append(all_runs[0][0])
+            elif rid == "previous":
+                if len(all_runs) < 2:
+                    print("Error: only one run exists — nothing to diff", file=sys.stderr)
+                    sys.exit(1)
+                resolved.append(all_runs[1][0])
+            else:
+                # Exact run ID
+                found = False
+                for r_id, _ in all_runs:
+                    if r_id == rid:
+                        found = True
+                        break
+                if not found:
+                    print(f"Error: run '{rid}' not found in manifest", file=sys.stderr)
+                    sys.exit(1)
+                resolved.append(rid)
+
+        # Determine output type
+        out_type = args.output_type
+        if not out_type:
+            # Auto-detect: find first common output between the two runs
+            for otype in ("schematic", "pcb", "emc", "spice"):
+                fname = CANONICAL_OUTPUTS.get(otype, f"{otype}.json")
+                if (os.path.isfile(os.path.join(analysis_dir, resolved[0], fname)) and
+                    os.path.isfile(os.path.join(analysis_dir, resolved[1], fname))):
+                    out_type = otype
+                    break
+            if not out_type:
+                print("Error: no common output files between runs", file=sys.stderr)
+                sys.exit(1)
+
+        filename = CANONICAL_OUTPUTS.get(out_type, f"{out_type}.json")
+        args.base = os.path.join(analysis_dir, resolved[0], filename)
+        args.head = os.path.join(analysis_dir, resolved[1], filename)
+
+    elif not args.base or not args.head:
+        if not args.trend:
+            parser.error("provide base and head paths, or use --analysis-dir")
+
+    if args.trend:
+        if not args.analysis_dir:
+            parser.error("--trend requires --analysis-dir")
+        out_type = args.output_type or "schematic"
+        trends = _extract_trends(args.analysis_dir, out_type, args.trend)
+        if args.text:
+            print(_format_trends(trends, args.trend))
+        else:
+            json.dump({"trends": trends, "n_runs": args.trend}, sys.stdout, indent=2)
+            print()
+        sys.exit(0)
 
     # Load inputs
     try:
@@ -916,6 +1221,19 @@ def main():
     head_type = detect_type(head)
     if not base_type or not head_type:
         print("Error: could not detect analyzer type from JSON", file=sys.stderr)
+        sys.exit(1)
+    # Check for pre-v1.3 format
+    old_files = []
+    if base_type == "schematic_old":
+        old_files.append(f"base ({args.base})")
+    if head_type == "schematic_old":
+        old_files.append(f"head ({args.head})")
+    if old_files:
+        print(f"Error: {' and '.join(old_files)} use the pre-v1.3 "
+              f"signal_analysis wrapper format.\n"
+              f"Re-run analyze_schematic.py to produce the current "
+              f"findings[] format, then re-run this diff.",
+              file=sys.stderr)
         sys.exit(1)
     if base_type != head_type:
         print(f"Error: type mismatch — base is {base_type}, head is {head_type}", file=sys.stderr)
@@ -940,6 +1258,11 @@ def main():
         "summary": summary,
         "diff": diff_result,
     }
+
+    regressions = classify_regressions(base_type, diff_result)
+    if regressions:
+        output["regressions"] = regressions
+        output["summary"]["regressions"] = len(regressions)
 
     if args.text:
         text = format_text(output)

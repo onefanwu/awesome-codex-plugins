@@ -4,9 +4,9 @@
 
 **Languages:** English | [Русский](README.ru.md)
 
-**Russian text quality plugin for Claude Code, Codex CLI, Gemini CLI, and Cursor** — typography, information style, editorial standards, UX writing, and business correspondence.
+**Russian text quality plugin for Claude Code, GitHub Copilot, Windsurf, Cursor, JetBrains, and [6 more platforms](#quick-start)** — typography, information style, editorial standards, UX writing, and business correspondence.
 
-~1040 independently formulated rules informed by 16 canonical Russian-language sources. All formulations are original — no verbatim quotes, full attribution.
+~1,040 independently formulated rules informed by 16 canonical Russian-language sources. All formulations are original — no verbatim quotes, full attribution.
 
 ## Acknowledgments
 
@@ -17,9 +17,9 @@ This plugin exists because a handful of people decided that Russian text on the 
 
 ru-text gives your AI coding assistant a deep understanding of Russian text quality. It auto-activates when the assistant produces or edits Russian text, applying typography rules instantly and loading domain-specific knowledge on demand.
 
-Works with Claude Code, Codex CLI, Gemini CLI, and Cursor.
+Works with Claude Code, GitHub Copilot, Windsurf, Cursor, Cline, JetBrains (Junie), Continue.dev, Codex CLI, Gemini CLI, OpenClaw, and Notion.
 
-- **~1040 rules** across 7 domains, packed into 9 reference files + addenda
+- **~1,040 rules** across 7 domains, packed into 9 reference files + addenda
 - **Auto-activation** — no need to remember to turn it on
 - **Covers everything** — from em dashes and guillemets to UX microcopy and business email tone
 - **Non-dogmatic** — your explicit style request always overrides default rules
@@ -49,16 +49,20 @@ Works with Claude Code, Codex CLI, Gemini CLI, and Cursor.
 /plugin marketplace add anthropics/claude-plugins-community
 
 # Install the plugin
-/plugin install ru-text
+/plugin install ru-text@claude-community
 ```
 
 Available in the [Anthropic plugin marketplace](https://claude.com/plugins). Works in Claude Code CLI, VS Code, JetBrains, Web, and Desktop.
 
 ### Codex CLI
 
-```bash
-codex install talkstream/ru-text
+Inside a Codex session, use the interactive plugin browser:
+
 ```
+/plugins
+```
+
+Search for "ru-text" and install. Alternatively, use the universal skills CLI (see below).
 
 ### Gemini CLI
 
@@ -68,12 +72,128 @@ gemini extensions install https://github.com/talkstream/ru-text
 
 ### Cursor
 
-Copy the skill to your project:
+Use the plugin command in Cursor Agent chat:
+
+```
+/add-plugin
+```
+
+Search for "ru-text" and install. If not listed in the marketplace, copy manually:
 
 ```bash
 git clone https://github.com/talkstream/ru-text.git
-cp -r ru-text/skills/ru-text .agents/skills/ru-text
+cp -r ru-text/skills/ru-text ~/.cursor/skills/ru-text
 ```
+
+Windows (PowerShell):
+
+```powershell
+git clone https://github.com/talkstream/ru-text.git
+Copy-Item -Recurse ru-text\skills\ru-text "$env:USERPROFILE\.cursor\skills\ru-text"
+```
+
+### GitHub Copilot
+
+If ru-text is already installed for Claude Code in your project, Copilot detects it automatically. Otherwise:
+
+```bash
+npx skills add talkstream/ru-text
+```
+
+Or copy manually:
+
+```bash
+git clone https://github.com/talkstream/ru-text.git
+cp -r ru-text/skills/ru-text .github/skills/ru-text
+```
+
+Works in VS Code, Visual Studio, and JetBrains IDEs with Copilot.
+
+### Windsurf
+
+```bash
+npx skills add talkstream/ru-text
+```
+
+Or copy manually to the Windsurf skills directory:
+
+```bash
+git clone https://github.com/talkstream/ru-text.git
+cp -r ru-text/skills/ru-text .windsurf/skills/ru-text
+```
+
+Invoke with `@ru-text` in Cascade chat. Also available via Cascade panel > Customizations > Skills.
+
+### Cline
+
+If ru-text is already installed for Claude Code in your project, Cline detects it automatically. Otherwise:
+
+```bash
+npx skills add talkstream/ru-text
+```
+
+Or copy manually:
+
+```bash
+git clone https://github.com/talkstream/ru-text.git
+cp -r ru-text/skills/ru-text .cline/skills/ru-text
+```
+
+Enable skills in Cline settings: Features > Enable Skills.
+
+### JetBrains (Junie)
+
+```bash
+npx skills add talkstream/ru-text
+```
+
+Or copy manually:
+
+```bash
+git clone https://github.com/talkstream/ru-text.git
+cp -r ru-text/skills/ru-text .junie/skills/ru-text
+```
+
+Works in IntelliJ IDEA, PyCharm, WebStorm, GoLand, PhpStorm, RubyMine, RustRover, Rider, CLion, and Android Studio.
+
+### Continue
+
+If ru-text is already installed for Claude Code in your project, Continue detects it automatically. Otherwise:
+
+```bash
+npx skills add talkstream/ru-text
+```
+
+Or copy manually:
+
+```bash
+git clone https://github.com/talkstream/ru-text.git
+cp -r ru-text/skills/ru-text .continue/skills/ru-text
+```
+
+Works in both VS Code and JetBrains extensions.
+
+### OpenClaw
+
+```bash
+openclaw skills install ru-text
+```
+
+Available on [ClawHub](https://clawhub.ai/talkstream/ru-text). Works with any LLM provider and messaging channel OpenClaw supports.
+
+### Notion
+
+Two integration paths — see [notion/README.md](notion/README.md) for details:
+
+**Notion AI Custom Skill** (standalone, Business/Enterprise plan):
+1. Copy [the template page](notion/ru-text-notion-skill.md) into a Notion page
+2. Designate the page as an AI skill
+3. Select text and invoke "ru-text" from the AI menu
+
+**Notion via MCP** (with Claude Code, any plan):
+1. Install ru-text in Claude Code
+2. Connect the [Notion MCP server](https://developers.notion.com/guides/mcp/get-started-with-mcp)
+3. Ask Claude Code to read, check, and update your Notion pages
 
 ### Any platform via skills CLI
 
@@ -118,9 +238,9 @@ If you explicitly request a specific style — casual, academic, SEO, literary, 
 ## Technical quality
 
 Built to Anthropic's Claude Code plugin specs:
-- SKILL.md: 560 words, 84 lines (guideline: under 2 000 words, under 500 lines)
+- SKILL.md: 539 words, 88 lines (guideline: under 2,000 words, under 500 lines)
 - 9 reference files load on demand, never at session start
-- ~1 040 rules organized into 7 thematic areas with progressive disclosure
+- ~1,040 rules organized into 7 thematic areas with progressive disclosure
 
 ## Intellectual property notice
 
@@ -141,6 +261,16 @@ and further study.
 
 Product names mentioned are trademarks of their respective owners, used here
 for informational purposes only.
+
+## Roadmap
+
+Next steps for expanding ru-text to new audiences:
+
+- **Telegram Bot** — text quality checking and /ru-score via Telegram
+- **Browser Extension** — Russian text quality in any web text field (Chrome, Firefox)
+- **WordPress Plugin** — typography and quality scoring in the Gutenberg editor
+
+Contributions and ideas welcome — [open an issue](https://github.com/talkstream/ru-text/issues) or [start a discussion](https://github.com/talkstream/ru-text/discussions).
 
 ## Sources and credits
 
@@ -178,8 +308,14 @@ for informational purposes only.
 ### Online tools
 
 - **Glavred** ([glvrd.ru](https://glvrd.ru)) — checks text for info-style quality, highlights filler, scores 0–10
-- **Lebedev Typograf** ([typograf.artlebedev.ru](https://typograf.artlebedev.ru)) — auto-fixes typography: quotes, dashes, non-breaking spaces
+- **Lebedev Typograf** ([typograf.artlebedev.ru](https://www.artlebedev.ru/typograf/)) — auto-fixes typography: quotes, dashes, non-breaking spaces
 - **Orfogrammka** ([orfogrammka.ru](https://orfogrammka.ru)) — grammar, spelling, and punctuation checker
+
+## See also
+
+- [Glavred](https://glvrd.ru) — checks text for info-style quality, highlights filler, scores 0–10
+- [Typograf](https://www.artlebedev.ru/typograf/) — auto-fixes typography: quotes, dashes, non-breaking spaces
+- [Orfogrammka](https://orfogrammka.ru) — grammar, spelling, and punctuation checker
 
 ## Author
 

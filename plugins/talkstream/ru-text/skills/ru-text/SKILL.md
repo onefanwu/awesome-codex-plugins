@@ -4,6 +4,11 @@ description: >
   Use when writing, editing, or reviewing Russian-language text, or when user
   mentions ru-text. Covers typography, info-style, editorial, UX writing, business
   correspondence. Auto-activates on Russian text output.
+metadata:
+  openclaw:
+    always: true
+    emoji: "\U0001F4DD"
+    homepage: "https://ru-text.org"
 ---
 
 # ru-text — Russian Text Quality
@@ -21,7 +26,7 @@ Apply these rules to ALL Russian text output without exception.
 | Rule | Wrong | Correct |
 |---|---|---|
 | Primary quotes: guillemets | "текст" | «текст» |
-| Nested quotes: lapki | «"вложенные"» | «„вложенные"» |
+| Nested quotes: lapki | «"вложенные"» | «„вложенные“» |
 | Em dash with spaces | слово - слово | слово — слово |
 | En dash for ranges, no spaces | 10-15 дней | 10–15 дней |
 | NBSP after single-letter prepositions | в начале (breakable) | в\u00A0начале |
@@ -75,7 +80,7 @@ If the path is not resolved, search: `Glob("**/ru-text/references/scoring.md")` 
 
 Before delivering Russian text:
 
-- [ ] Quotes: «» primary, „" nested
+- [ ] Quotes: «» primary, „“ nested
 - [ ] Dashes: — in text, – in ranges, - only in compounds; max 1–2 per paragraph
 - [ ] NBSP after в, к, с, о, у, и, а
 - [ ] Ellipsis: … (single char)

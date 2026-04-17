@@ -10,6 +10,14 @@ Usage:
     python3 kidoc_scaffold.py --project-dir . --type design_review --output reports/DR.md
     python3 kidoc_scaffold.py --project-dir . --config .kicad-happy.json --output reports/
 
+Explicit analyzer JSON inputs (bypass the analysis cache lookup — useful
+for harness batch runs and any caller that already has analyzer outputs
+on disk but not organised under an analysis/manifest.json convention):
+
+    python3 kidoc_scaffold.py --schematic-json sch.json --pcb-json pcb.json \\
+        --emc-json emc.json --thermal-json thermal.json --type hdd \\
+        --output reports/HDD.md
+
 Zero external dependencies — Python 3.8+ stdlib only.
 """
 
@@ -66,73 +74,104 @@ except ImportError:
 
 def load_analysis_cache(project_dir: str,
                         cache_dir: str | None = None) -> dict:
-    """Load all analysis JSONs from the cache directory.
+    """Load all analysis JSONs from the analysis/ manifest.
 
-    Searches in order:
-    1. cache_dir if specified
-    2. reports/cache/analysis/ under project_dir
-    3. project_dir itself (for analysis JSONs placed alongside schematics)
+    Uses the manifest.json in the analysis directory to find the current
+    run folder and load all output JSONs from it.
+
+    Falls back to direct file search in cache_dir or project_dir if
+    no manifest exists (for backwards compat during transition).
+
+    Args:
+        project_dir: Root directory of the KiCad project.
+        cache_dir: Override analysis directory path.
 
     Returns dict with keys: schematic, pcb, emc, thermal, spice, gate.
     """
-    search_dirs = []
-    if cache_dir:
-        search_dirs.append(cache_dir)
-    search_dirs.append(os.path.join(project_dir, 'reports', 'cache', 'analysis'))
-    search_dirs.append(project_dir)
-
     cache = {}
-    file_patterns = {
-        'schematic': ['*schematic*.json', '*_sch*.json', 'schematic.json'],
-        'pcb': ['*pcb*.json', '*_pcb*.json', 'pcb.json'],
-        'emc': ['*emc*.json', 'emc.json'],
-        'thermal': ['*thermal*.json', 'thermal.json'],
-        'spice': ['*spice*.json', '*simulation*.json', 'spice.json'],
-        'gate': ['*gate*.json', '*fab_release*.json', 'gate.json'],
-    }
 
-    for analysis_type, patterns in file_patterns.items():
-        if analysis_type in cache:
-            continue
-        for search_dir in search_dirs:
-            if not os.path.isdir(search_dir):
-                continue
-            for fname in os.listdir(search_dir):
-                if not fname.endswith('.json'):
-                    continue
-                fname_lower = fname.lower()
-                for pattern in patterns:
-                    # Simple glob matching
-                    pat = pattern.replace('*', '')
-                    if pat in fname_lower:
-                        fpath = os.path.join(search_dir, fname)
+    # Determine analysis directory
+    analysis_dir = cache_dir
+    if not analysis_dir:
+        # Read output_dir from config
+        try:
+            from project_config import load_config
+            config = load_config(project_dir)
+            analysis_dir = os.path.join(
+                project_dir,
+                config.get('analysis', {}).get('output_dir', 'analysis'))
+        except ImportError:
+            analysis_dir = os.path.join(project_dir, 'analysis')
+
+    # Try manifest-based loading
+    manifest_path = os.path.join(analysis_dir, 'manifest.json')
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+            current_id = manifest.get('current')
+            if current_id and current_id in manifest.get('runs', {}):
+                run_dir = os.path.join(analysis_dir, current_id)
+                run_meta = manifest['runs'][current_id]
+                for analysis_type, filename in run_meta.get('outputs', {}).items():
+                    filepath = os.path.join(run_dir, filename)
+                    if os.path.isfile(filepath):
                         try:
-                            with open(fpath) as f:
-                                data = json.load(f)
-                            # Verify it's the right type
-                            if analysis_type == 'schematic' and 'components' in data:
-                                cache['schematic'] = data
-                            elif analysis_type == 'pcb' and 'footprints' in data:
-                                cache['pcb'] = data
-                            elif analysis_type == 'emc' and 'findings' in data and 'emc_risk_score' in str(data.get('summary', {})):
-                                cache['emc'] = data
-                            elif analysis_type == 'thermal' and 'thermal_assessments' in data:
-                                cache['thermal'] = data
-                            elif analysis_type == 'spice' and 'simulation_results' in data:
-                                cache['spice'] = data
-                            elif analysis_type == 'gate' and 'overall_status' in data:
-                                cache['gate'] = data
-                            if analysis_type in cache:
-                                break
-                        except (json.JSONDecodeError, OSError) as exc:
-                            print(f"  Warning: failed to load {fpath}: {exc}",
-                                  file=sys.stderr)
-                if analysis_type in cache:
-                    break
+                            with open(filepath, 'r', encoding='utf-8') as f:
+                                cache[analysis_type] = json.load(f)
+                        except json.JSONDecodeError:
+                            pass
+                return cache
+        except (json.JSONDecodeError, OSError):
+            pass  # Fall through to empty return
 
+    # No manifest -- return empty cache
     return cache
 
 
+def _load_explicit_jsons(paths: dict) -> dict:
+    """Load analyzer JSONs from explicit CLI-provided paths.
+
+    Bypasses the manifest-based analysis cache lookup entirely. Used
+    when a caller (e.g., a batch harness runner) already has analyzer
+    outputs on disk and doesn't want kidoc to run its own discovery.
+
+    Args:
+        paths: dict mapping analysis type key ('schematic', 'pcb', 'emc',
+            'thermal') to file path, or None for unprovided types.
+
+    Returns:
+        dict mapping analysis type to loaded JSON dict, for paths that
+        were provided and loaded successfully. Types with a None path
+        are skipped. Types with an unreadable or malformed file cause
+        an error and sys.exit(1) — this function assumes explicit paths
+        are authoritative and should fail loudly rather than silently
+        skip.
+    """
+    cache = {}
+    for analysis_type, path in paths.items():
+        if path is None:
+            continue
+        if not os.path.isfile(path):
+            print(f"Error: {analysis_type} JSON not found: {path}",
+                  file=sys.stderr)
+            sys.exit(1)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            print(f"Error: cannot load {analysis_type} JSON {path}: {e}",
+                  file=sys.stderr)
+            sys.exit(1)
+        if ('signal_analysis' in data and 'findings' not in data
+                and analysis_type == 'schematic'):
+            print(f"Error: {path} uses the pre-v1.3 signal_analysis "
+                  f"wrapper format.\nRe-run analyze_schematic.py to "
+                  f"produce the current findings[] format.",
+                  file=sys.stderr)
+            sys.exit(1)
+        cache[analysis_type] = data
+    return cache
 
 
 # ======================================================================
@@ -178,7 +217,7 @@ def scaffold_document(project_dir: str, doc_type: str, output_path: str,
 
     # Determine paths for diagrams and schematic SVGs.
     # Figures live under reports/figures/ (git-tracked), separate from
-    # reports/cache/analysis/ (gitignored) which holds only JSON data.
+    # analysis/ (gitignored, managed by analysis_cache.py) which holds JSON data.
     output_abs = os.path.abspath(output_path)
     reports_root = os.path.dirname(output_abs)
     figures_base = os.path.join(reports_root, 'figures')
@@ -279,7 +318,7 @@ def _auto_run_analyses(project_dir: str, analysis_dir: str,
     Returns dict of {analysis_name: was_run_successfully} for reporting.
     """
     if figures_dir is None:
-        # Default: reports/figures/ (sibling of reports/cache/)
+        # Default: reports/figures/ (sibling of analysis output)
         figures_dir = os.path.join(os.path.dirname(os.path.normpath(analysis_dir)),
                                    '..', 'figures')
     results = {}
@@ -477,6 +516,25 @@ def main():
                         help='Path to .kicad-happy.json config')
     parser.add_argument('--analysis-dir', default=None,
                         help='Directory containing analysis JSONs')
+    parser.add_argument('--analyze', action='store_true',
+                        help='Run KiCad analysis scripts if no analysis data '
+                             'exists. Without this flag, errors when analysis '
+                             'is missing.')
+    parser.add_argument('--schematic-json', default=None,
+                        help='Explicit path to schematic analyzer JSON. '
+                             'When any of --schematic-json/--pcb-json/'
+                             '--emc-json/--thermal-json is provided, the '
+                             'manifest-based analysis cache lookup is '
+                             'bypassed entirely.')
+    parser.add_argument('--pcb-json', default=None,
+                        help='Explicit path to PCB analyzer JSON. See '
+                             '--schematic-json for mode notes.')
+    parser.add_argument('--emc-json', default=None,
+                        help='Explicit path to EMC analyzer JSON. See '
+                             '--schematic-json for mode notes.')
+    parser.add_argument('--thermal-json', default=None,
+                        help='Explicit path to thermal analyzer JSON. See '
+                             '--schematic-json for mode notes.')
     args = parser.parse_args()
 
     # Load spec (--spec overrides --type)
@@ -495,27 +553,63 @@ def main():
     else:
         config = load_config(args.project_dir)
 
-    # Auto-run available analyses before loading cache
-    analysis_dir = args.analysis_dir or os.path.join(
-        args.project_dir, 'reports', 'cache', 'analysis')
+    # Determine analysis directory from config or CLI
+    if args.analysis_dir:
+        analysis_dir = args.analysis_dir
+    else:
+        analysis_dir = os.path.join(
+            args.project_dir,
+            config.get('analysis', {}).get('output_dir', 'analysis'))
 
     # Figures (diagrams, schematics) go under reports/figures/ (git-tracked),
-    # separate from reports/cache/ (gitignored) which holds analysis JSONs.
+    # separate from analysis/ which holds analysis JSONs.
     output_dir = os.path.dirname(os.path.abspath(args.output))
     figures_dir = os.path.join(output_dir, 'figures')
 
-    auto_results = _auto_run_analyses(args.project_dir, analysis_dir,
-                                       figures_dir=figures_dir)
+    # Explicit JSON inputs bypass the manifest-based cache entirely.
+    # If any of --schematic-json/--pcb-json/--emc-json/--thermal-json
+    # is provided, _load_explicit_jsons is authoritative and we skip
+    # both the cache lookup and --analyze auto-run.
+    explicit_jsons = {
+        'schematic': args.schematic_json,
+        'pcb': args.pcb_json,
+        'emc': args.emc_json,
+        'thermal': args.thermal_json,
+    }
+    has_explicit = any(p is not None for p in explicit_jsons.values())
 
-    # Load analysis cache (now includes any auto-generated files)
-    cache = load_analysis_cache(args.project_dir, args.analysis_dir)
+    if has_explicit:
+        if args.analyze:
+            print('Error: --analyze cannot be combined with explicit '
+                  '--schematic-json/--pcb-json/--emc-json/--thermal-json '
+                  'flags. Explicit JSONs bypass the analysis pipeline; '
+                  'drop --analyze or drop the explicit flags.',
+                  file=sys.stderr)
+            sys.exit(1)
+        cache = _load_explicit_jsons(explicit_jsons)
+    else:
+        # Load analysis cache from manifest
+        cache = load_analysis_cache(args.project_dir, analysis_dir)
 
-    # Print summary of what's available
-    _print_analysis_summary(auto_results, analysis_dir, figures_dir=figures_dir)
-
-    if not cache:
-        print("Warning: no analysis JSONs found. Scaffold will have placeholder content.",
-              file=sys.stderr)
+        if not cache:
+            if args.analyze:
+                # Run analyses using existing _auto_run_analyses
+                auto_results = _auto_run_analyses(args.project_dir, analysis_dir,
+                                                   figures_dir=figures_dir)
+                cache = load_analysis_cache(args.project_dir, analysis_dir)
+                _print_analysis_summary(auto_results, analysis_dir,
+                                        figures_dir=figures_dir)
+                if not cache:
+                    print('Error: Analysis scripts ran but produced no output.',
+                          file=sys.stderr)
+                    sys.exit(1)
+            else:
+                print(f'Error: No analysis data found in '
+                      f'{analysis_dir}.\n'
+                      'Run with --analyze to generate it, or run the '
+                      'KiCad analysis skill first.',
+                      file=sys.stderr)
+                sys.exit(1)
 
     # Generate scaffold
     scaffold_document(

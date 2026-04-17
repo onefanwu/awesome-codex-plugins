@@ -6,7 +6,8 @@ description: >-
   datasheets. Find parts by keyword or MPN, check pricing/stock, download
   datasheets via API, analyze specifications. Sync and maintain a local
   datasheets directory — extract components from schematics, download missing
-  datasheets, keep them up to date. Use when the user asks about electronic
+  datasheets, keep them up to date. Also supports batch MPN-list seeding
+  (`--mpn-list`) for bulk workflows without a KiCad project. Use when the user asks about electronic
   components, part specs, datasheets, pricing, stock, footprints, or needs to
   download a datasheet — even without mentioning "DigiKey". Also for "sync
   datasheets", "download datasheets for my board/project", or mentions a
@@ -218,7 +219,7 @@ DigiKey's API provides **direct PDF URLs** for datasheets — this is the prefer
 
 ### Datasheet Directory Sync (Primary Workflow)
 
-Use `sync_datasheets_digikey.py` to maintain a `datasheets/` directory alongside a KiCad project. It extracts components from the schematic, searches DigiKey for datasheet URLs, downloads missing PDFs, and writes an `index.json` manifest. Subsequent runs are incremental — only new or changed parts are fetched.
+Use `sync_datasheets_digikey.py` to maintain a `datasheets/` directory alongside a KiCad project. It extracts components from the schematic, searches DigiKey for datasheet URLs, downloads missing PDFs, and writes an `manifest.json` manifest. Subsequent runs are incremental — only new or changed parts are fetched.
 
 ```bash
 # Sync datasheets for a KiCad project (creates datasheets/ next to the schematic)
@@ -238,18 +239,29 @@ python3 <skill-path>/scripts/sync_datasheets_digikey.py analyzer_output.json
 
 # Parallel downloads (3 workers)
 python3 <skill-path>/scripts/sync_datasheets_digikey.py <file.kicad_sch> --parallel 3
+
+# Batch mode — sync from a plain MPN list (no KiCad project required)
+python3 <skill-path>/scripts/sync_datasheets_digikey.py --mpn-list mpns.txt --output ./datasheets
 ```
+
+**MPN-list batch mode** (KH-312) — when you have a list of MPNs but no KiCad
+project to point at (harness datasheet seeding, bulk seeding a new part
+library). The file format is one MPN per line. Blank lines and `#`
+comments (full-line and inline) are skipped. Non-MPN strings (generic
+values like `100nF` or `DNP`) are filtered via `is_real_mpn()` and
+de-duplicated. Output defaults to `./datasheets/` in the current working
+directory when `--output` is omitted.
 
 The script:
 - **Runs the kicad schematic analyzer** automatically to extract components and MPNs
 - **Filters generic passives** — skips entries without real MPNs (e.g., "100nF", "10K")
 - **Tries schematic URLs first** — uses the datasheet URL embedded in the KiCad symbol before hitting the DigiKey API, saving API calls
-- **Writes `index.json` manifest** — maps each MPN to its PDF file, manufacturer, description, download status, and URL. The kicad skill reads this during design review to cross-reference datasheets with the schematic.
+- **Writes `manifest.json` manifest** — maps each MPN to its PDF file, manufacturer, description, download status, and URL. The kicad skill reads this during design review to cross-reference datasheets with the schematic.
 - **Tracks failures** — failed downloads are recorded with error details and not retried on subsequent runs unless `--force` is used
 - **Rate-limited** — 1 second between DigiKey API calls (configurable with `--delay`)
 - **Saves progress incrementally** — if interrupted, already-downloaded files are preserved
 
-The `index.json` manifest structure:
+The `manifest.json` manifest structure:
 ```json
 {
   "schematic": "/path/to/file.kicad_sch",

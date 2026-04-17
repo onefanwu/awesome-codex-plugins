@@ -1,9 +1,12 @@
 {
   "name": "@sitemd-cc/sitemd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Websites from Markdown. Built for AI coding assistants.",
   "bin": {
     "sitemd": "sitemd/sitemd"
+  },
+  "scripts": {
+    "postinstall": "node sitemd/install.js || true"
   },
   "files": [
     "sitemd/",

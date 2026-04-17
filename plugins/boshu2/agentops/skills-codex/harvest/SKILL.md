@@ -6,9 +6,25 @@ description: 'Cross-rig knowledge consolidation. One-time sweep + ongoing tiered
 
 # Harvest — Cross-Rig Knowledge Consolidation
 
+> **Nightly usage (2026-04-09):** `$dream start` now runs harvest as part
+> of its bounded compounding loop. Use `$harvest` for manual sweeps, CI
+> runs, or when Dream is disabled. Dream holds `.agents/overnight/run.lock`
+> while running — manual `ao harvest` will refuse until the lock releases.
+
 Sweep all `.agents/` directories across the workspace, extract learnings, patterns,
 and research, deduplicate cross-rig, and promote high-value items to the global
 knowledge hub (`~/.agents/learnings/`).
+
+> **Naming gotcha.** `$harvest` promotes into `~/.agents/learnings/`, not
+> `~/.agents/`. Users often say "harvest all to `~/.agents`" and mean the
+> promotion hub. If you really want every raw artifact (not just the
+> promotion set) mirrored verbatim, you want `rsync`, not `$harvest`.
+
+## Which skill do I need?
+
+See [docs/skills-decision-tree.md](../../docs/skills-decision-tree.md) for
+the full "which skill next?" decision table covering harvest, compile,
+dream, knowledge-activation, and quickstart.
 
 ## What This Skill Does
 

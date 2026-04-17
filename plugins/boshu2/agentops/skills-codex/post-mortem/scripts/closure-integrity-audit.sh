@@ -63,6 +63,7 @@ command -v bd >/dev/null 2>&1 || {
 }
 
 FILE_PATH_REGEX='([.[:alnum:]_-]+/)*[.[:alnum:]_-]+\.[[:alpha:]][[:alnum:]_-]*'
+GENERIC_REPO_PATH_REGEX='([.[:alnum:]_-]+/)+[.[:alnum:]_-]+\.[[:alpha:]][[:alnum:]_-]*'
 
 json_array_from_stream() {
   if ! sed '/^[[:space:]]*$/d' | sort -u | jq -R . | jq -s .; then
@@ -195,6 +196,10 @@ extract_file_paths_from_stream() {
   grep -oE "$FILE_PATH_REGEX" || true
 }
 
+strip_urls_from_stream() {
+  sed -E 's@[[:alpha:]][[:alnum:]+.-]*://[^[:space:])>]+@@g'
+}
+
 extract_first_file_path_from_stream() {
   extract_file_paths_from_stream | head -n 1
 }
@@ -203,14 +208,20 @@ extract_files_section_from_text() {
   awk '
     tolower($0) ~ /^[[:space:]]*files:[[:space:]]*$/ { in_files = 1; next }
     tolower($0) ~ /^[[:space:]]*files likely owned:[[:space:]]*$/ { in_files = 1; next }
+    tolower($0) ~ /^[[:space:]]*likely files:[[:space:]]*$/ { in_files = 1; next }
+    tolower($0) ~ /^[[:space:]]*primary files:[[:space:]]*$/ { in_files = 1; next }
+    tolower($0) ~ /^[[:space:]]*scoped files:[[:space:]]*$/ { in_files = 1; next }
     in_files {
       if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^```/) {
         exit
       }
-      if ($0 !~ /^[[:space:]]*-/) {
+      # Accept lines starting with - or * (bullet points)
+      if ($0 !~ /^[[:space:]]*[-*]/) {
         exit
       }
-      sub(/^[[:space:]]*-[[:space:]]*/, "", $0)
+      # Strip bullet prefix and backticks
+      sub(/^[[:space:]]*[-*][[:space:]]*/, "", $0)
+      gsub(/`/, "", $0)
       print
     }
   ' | extract_file_paths_from_stream
@@ -223,10 +234,10 @@ extract_labeled_files_from_text() {
   while IFS= read -r line; do
     candidate=""
 
-    if [[ "$line" =~ [Nn][Ee][Ww][[:space:]]+[Ff][Ii][Ll][Ee][Ss]?:[[:space:]]*(.*)$ ]]; then
-      candidate="${BASH_REMATCH[1]}"
-    elif [[ "$line" =~ [Ff][Ii][Ll][Ee]:[[:space:]]*(.*)$ ]]; then
-      candidate="${BASH_REMATCH[1]}"
+    if [[ "$line" =~ (^|[[:space:][:punct:]])New[[:space:]]+[Ff][Ii][Ll][Ee][Ss]?:[[:space:]]*(.*)$ ]]; then
+      candidate="${BASH_REMATCH[2]}"
+    elif [[ "$line" =~ (^|[[:space:][:punct:]])File:[[:space:]]*(.*)$ ]]; then
+      candidate="${BASH_REMATCH[2]}"
     fi
 
     if [[ -n "$candidate" ]]; then
@@ -235,8 +246,122 @@ extract_labeled_files_from_text() {
   done
 }
 
+extract_repo_relative_paths_from_text() {
+  local line=""
+
+  while IFS= read -r line; do
+    printf '%s\n' "$line" \
+      | strip_urls_from_stream \
+      | grep -oE "$GENERIC_REPO_PATH_REGEX" || true
+  done
+}
+
+extract_prose_file_paths_from_text() {
+  strip_urls_from_stream | extract_file_paths_from_stream | grep -vx 'SKILL[.]md' || true
+}
+
+extract_validation_command_strings_from_block() {
+  local validation_block="$1"
+
+  [[ -n "$validation_block" ]] || return 0
+  printf '%s\n' "$validation_block" \
+    | jq -r '
+        def roots:
+          if type == "array" then .[]
+          else .
+          end;
+        roots |
+        (
+          .command?,
+          .commands[]?,
+          .test?,
+          .tests?,
+          .validation_command?,
+          .validation_commands[]?
+        )
+        | select(type == "string" and length > 0)
+      ' 2>/dev/null || true
+}
+
+normalize_command_path() {
+  local raw="$1"
+  local cd_dir="$2"
+  local path="$raw"
+
+  path="${path#./}"
+  path="${path%/}"
+  cd_dir="${cd_dir#./}"
+  cd_dir="${cd_dir%/}"
+
+  [[ -n "$path" ]] || return 0
+  if [[ -n "$cd_dir" && "$raw" == ./* ]]; then
+    printf '%s/%s\n' "$cd_dir" "$path"
+  else
+    printf '%s\n' "$path"
+  fi
+}
+
+extract_paths_from_command_string() {
+  local command_text="$1"
+  local cd_dir=""
+  local cd_regex='(^|[[:space:];|&])cd[[:space:]]+([^[:space:];|&]+)[[:space:]]*&&'
+  local raw_path=""
+
+  if [[ "$command_text" =~ $cd_regex ]]; then
+    cd_dir="${BASH_REMATCH[2]}"
+    cd_dir="${cd_dir%\"}"
+    cd_dir="${cd_dir#\"}"
+    cd_dir="${cd_dir%\'}"
+    cd_dir="${cd_dir#\'}"
+    normalize_command_path "$cd_dir" ""
+  fi
+
+  {
+    printf '%s\n' "$command_text" \
+      | strip_urls_from_stream \
+      | grep -oE '(\./)?([.[:alnum:]_-]+/)+[.[:alnum:]_-]+/?' || true
+    printf '%s\n' "$command_text" \
+      | strip_urls_from_stream \
+      | extract_file_paths_from_stream
+  } | while IFS= read -r raw_path; do
+    normalize_command_path "$raw_path" "$cd_dir"
+  done
+}
+
+extract_validation_command_paths_from_block() {
+  local validation_block="$1"
+  local command_text=""
+
+  extract_validation_command_strings_from_block "$validation_block" \
+    | while IFS= read -r command_text; do
+      extract_paths_from_command_string "$command_text"
+    done
+}
+
+expand_scoped_paths_from_stream() {
+  local path=""
+  local expanded=""
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    printf '%s\n' "$path"
+
+    if [[ "$path" != */* && "$path" == *.* ]]; then
+      expanded="$(run_git_clean ls-files --cached --others --exclude-standard -- "$path" ":(glob)**/$path" 2>/dev/null || true)"
+      [[ -n "$expanded" ]] && printf '%s\n' "$expanded"
+    fi
+  done
+}
+
 extract_backticked_files_from_text() {
-  grep -oE "\`$FILE_PATH_REGEX\`" | tr -d '`' || true
+  # Handle backticked filenames across multiple lines, including nested backticks
+  # and paths with spaces or special characters inside backticks
+  tr '\n' '\0' \
+    | grep -zoE "\`[^\`]+\`" \
+    | tr '\0' '\n' \
+    | tr -d '`' \
+    | grep -E "$FILE_PATH_REGEX" \
+    | grep -oE "$FILE_PATH_REGEX" || true
 }
 
 extract_scoped_files() {
@@ -257,10 +382,32 @@ extract_scoped_files() {
 
   {
     extract_validation_files_from_block "$validation_block"
+    extract_validation_command_paths_from_block "$validation_block"
     printf '%s\n' "$description" | extract_labeled_files_from_text
     printf '%s\n' "$description" | extract_files_section_from_text
     printf '%s\n' "$description" | extract_backticked_files_from_text
-  } | sed '/^[[:space:]]*$/d' | sort -u
+    printf '%s\n' "$description" | extract_repo_relative_paths_from_text
+    printf '%s\n' "$description" | extract_prose_file_paths_from_text
+  } | sed '/^[[:space:]]*$/d' | expand_scoped_paths_from_stream | sort -u
+}
+
+description_has_file_patterns() {
+  # Returns 0 (true) if the bead's description mentions file-like patterns
+  # (contains "/" or ".go" or ".sh" or ".md"). Used to distinguish a genuine
+  # parser miss from a bead that simply has no file scope at all.
+  local child="$1"
+  local description=""
+  local child_json=""
+  local human_output=""
+
+  if child_json="$(bd_show_json "$child" 2>/dev/null)"; then
+    description="$(printf '%s\n' "$child_json" | jq -r '.description // ""')"
+  else
+    human_output="$(bd show "$child" 2>/dev/null || true)"
+    description="$(printf '%s\n' "$human_output" | extract_description_from_show_text)"
+  fi
+
+  printf '%s\n' "$description" | grep -qE '/|\.go|\.sh|\.md'
 }
 
 issue_timestamp() {
@@ -276,7 +423,7 @@ commit_ref_exists() {
 
   escaped_child="$(regex_escape_extended "$child")"
   pattern="(^|[^[:alnum:]_.-])${escaped_child}([^[:alnum:]_.-]|$)"
-  run_git_clean log --format='%H' --all --extended-regexp --grep="$pattern" 2>/dev/null | grep -q .
+  run_git_clean log -n 1 --format='%H' --all --extended-regexp --grep="$pattern" 2>/dev/null | grep -q .
 }
 
 commit_matches_json() {
@@ -285,7 +432,7 @@ commit_matches_json() {
   shift 2
   local file
   local -a matched_files=()
-  local -a git_args=(log --format=%H --all --diff-filter=ACMR)
+  local -a git_args=(log -n 1 --format=%H --all --diff-filter=ACMR)
 
   [[ -n "$since" ]] && git_args+=("--since=$since")
   [[ -n "$until" ]] && git_args+=("--until=$until")
@@ -324,6 +471,97 @@ worktree_matches_json() {
   } | json_array_from_stream
 }
 
+is_discovery_phase_path() {
+  # Discovery-phase artifacts are ephemeral seeds for brainstorm/research/discovery
+  # sessions. They are NOT durable proof surfaces. A closed bead that cites one
+  # but never persisted it should not hard-fail closure-integrity-audit as long
+  # as the bead has other real proof (commit referencing the id, a non-discovery
+  # scoped file that does have evidence, or an evidence-only packet).
+  local path="$1"
+  [[ "$path" == .agents/brainstorm/* ]] && return 0
+  [[ "$path" == .agents/research/* ]] && return 0
+  [[ "$path" == .agents/discovery/* ]] && return 0
+  return 1
+}
+
+all_scoped_files_are_discovery() {
+  # Returns 0 (true) if every scoped file is a discovery-phase artifact AND
+  # there is at least one such file. Empty input returns 1 (false).
+  local file
+  local any=1
+  for file in "$@"; do
+    any=0
+    is_discovery_phase_path "$file" || return 1
+  done
+  return $any
+}
+
+child_has_nondiscovery_proof_surface() {
+  # Returns 0 (true) if the bead has at least one non-discovery proof surface
+  # that audits can replay against:
+  #   - a commit message referencing the bead id
+  #   - a durable evidence-only packet
+  #   - a .agents/plans/ or .agents/findings/ file referenced in the bead text
+  #     that actually exists on disk
+  #   - any non-discovery file path referenced in the bead text (description +
+  #     close reason) that has real git history
+  # Used only to downgrade discovery-only timing misses to discovery_miss WARN.
+  local child="$1"
+  local packet_path=""
+
+  if commit_ref_exists "$child"; then
+    return 0
+  fi
+  if packet_path="$(durable_packet_path_for_child "$child")" && packet_is_valid_for_child "$packet_path" "$child"; then
+    return 0
+  fi
+
+  local human_output
+  human_output="$(bd show "$child" 2>/dev/null || true)"
+  [[ -n "$human_output" ]] || return 1
+
+  # Collect all file-like paths from the full bd-show text (description +
+  # close reason). Filter to non-discovery paths.
+  local candidate=""
+  while IFS= read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    is_discovery_phase_path "$candidate" && continue
+    case "$candidate" in
+      .agents/plans/*|.agents/findings/*|.agents/council/*|.agents/releases/*)
+        [[ -e "$candidate" ]] && return 0
+        ;;
+    esac
+    # Any non-discovery file path that exists OR has git history counts.
+    if [[ -e "$candidate" ]]; then
+      return 0
+    fi
+    if run_git_clean log -n 1 --format=%H --all --diff-filter=ACMR -- "$candidate" 2>/dev/null | grep -q .; then
+      return 0
+    fi
+  done < <(
+    printf '%s\n' "$human_output" \
+      | strip_urls_from_stream \
+      | extract_file_paths_from_stream \
+      | sed '/^[[:space:]]*$/d' \
+      | sort -u
+  )
+
+  # Last proof surface: a non-trivial "Close reason:" line (>= 24 chars of
+  # free text after the prefix). A substantive close reason written at
+  # bd-close time is itself auditable evidence that the work was accepted.
+  # Empty or generic close reasons do NOT count.
+  local close_reason_len=0
+  close_reason_len="$(
+    printf '%s\n' "$human_output" \
+      | awk -F'Close reason:' '/Close reason:/ { print length($2); exit }'
+  )"
+  if [[ -n "$close_reason_len" && "$close_reason_len" -ge 24 ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 child_is_closed() {
   local child_json="$1"
 
@@ -337,18 +575,35 @@ child_is_closed() {
 add_grace_to_timestamp() {
   local ts="$1"
   local grace="$2"
+  local normalized_ts=""
+  local naive_ts=""
+  local epoch=""
+
   [[ -n "$ts" ]] || return 1
   if date -d "$ts + ${grace} seconds" -Iseconds 2>/dev/null; then
     return 0
   fi
-  # macOS date fallback: strip colon from timezone offset for %z parsing
-  local ts_nocolon="${ts%:*}${ts##*:}"
-  local epoch
-  epoch="$(date -jf '%Y-%m-%dT%H:%M:%S%z' "$ts_nocolon" '+%s' 2>/dev/null)" || {
+
+  # macOS date fallback: parse UTC Z or strip colon from timezone offset for %z.
+  if [[ "$ts" == *Z ]]; then
+    epoch="$(date -u -jf '%Y-%m-%dT%H:%M:%SZ' "$ts" '+%s' 2>/dev/null)" || true
+  fi
+
+  if [[ -z "$epoch" ]]; then
+    normalized_ts="$ts"
+    if [[ "$normalized_ts" =~ [+-][0-9]{2}:[0-9]{2}$ ]]; then
+      normalized_ts="${normalized_ts%:*}${normalized_ts##*:}"
+    fi
+    epoch="$(date -jf '%Y-%m-%dT%H:%M:%S%z' "$normalized_ts" '+%s' 2>/dev/null)" || true
+  fi
+
+  if [[ -z "$epoch" ]]; then
     # Last resort: parse date portion only (loses TZ accuracy, acceptable for grace)
-    epoch="$(date -jf '%Y-%m-%dT%H:%M:%S' "${ts%%[+-]*}" '+%s' 2>/dev/null)" || return 1
-  }
-  date -r $((epoch + grace)) '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null
+    naive_ts="$(printf '%s\n' "$ts" | sed -E 's/Z$//; s/[+-][0-9]{2}:?[0-9]{2}$//')"
+    epoch="$(date -jf '%Y-%m-%dT%H:%M:%S' "$naive_ts" '+%s' 2>/dev/null)" || return 1
+  fi
+
+  date -u -r $((epoch + grace)) '+%Y-%m-%dT%H:%M:%S+00:00' 2>/dev/null
 }
 
 packet_is_valid_for_child() {
@@ -356,9 +611,13 @@ packet_is_valid_for_child() {
   local child="$2"
 
   [[ -f "$packet_path" ]] || return 1
+  # Accept any packet whose target_id matches and has at least one artifact.
+  # The packet's evidence_mode field describes what was happening in the repo at
+  # write time (commit/staged/worktree/auto); it does NOT determine whether the
+  # packet itself is valid closure proof.  The file's presence at the
+  # evidence-only-closures path is the proof — do not gatekeep on evidence_mode.
   jq -e --arg child "$child" '
     .target_id == $child and
-    (.evidence_mode | IN("commit", "staged", "worktree")) and
     (.evidence.artifacts | type == "array" and length > 0)
   ' "$packet_path" >/dev/null 2>&1
 }
@@ -378,9 +637,29 @@ durable_packet_path_for_child() {
   return 1
 }
 
-packet_evidence_mode() {
-  local packet_path="$1"
-  jq -r '.evidence_mode' "$packet_path"
+has_evidence_only_packet() {
+  # Returns 0 iff a durable evidence-only closure packet exists for the given
+  # target id AND parses as JSON containing both `evidence_mode` and
+  # `repo_state` keys (the schema written by
+  # skills/post-mortem/scripts/write-evidence-only-closure.sh).
+  #
+  # Used as a top-of-loop short-circuit in classify_child: when this returns 0,
+  # the bead is accepted as fully closed (PASS, evidence-only-packet) and ALL
+  # other classification paths (parser_miss, timing_miss, discovery_miss) are
+  # skipped. This makes evidence-only packets the strongest proof surface.
+  local target_id="$1"
+  local safe_target="${target_id//\//_}"
+  local packet_path=""
+
+  if [[ -f ".agents/releases/evidence-only-closures/${safe_target}.json" ]]; then
+    packet_path=".agents/releases/evidence-only-closures/${safe_target}.json"
+  elif [[ -f ".agents/council/evidence-only-closures/${safe_target}.json" ]]; then
+    packet_path=".agents/council/evidence-only-closures/${safe_target}.json"
+  else
+    return 1
+  fi
+
+  jq -e 'has("evidence_mode") and has("repo_state")' "$packet_path" >/dev/null 2>&1
 }
 
 packet_matches_json() {
@@ -421,7 +700,6 @@ classify_child() {
   local created_at=""
   local closed_at=""
   local packet_path=""
-  local packet_mode=""
   local scoped_json commit_json staged_json worktree_json packet_json
   local -a scoped_files=()
 
@@ -439,6 +717,22 @@ classify_child() {
     if [[ "$human_output" != *"CLOSED"* ]]; then
       return 0
     fi
+  fi
+
+  # Evidence-only packet short-circuit: when a durable closure packet exists
+  # for this bead AND it has the schema written by write-evidence-only-closure.sh
+  # (must contain `evidence_mode` and `repo_state` keys), accept the bead as
+  # fully closed and skip ALL other classification paths. Evidence-only packets
+  # are the strongest proof surface — they bypass parser_miss, timing_miss, and
+  # discovery_miss because the packet itself is the durable, replayable proof.
+  if has_evidence_only_packet "$child"; then
+    if packet_path="$(durable_packet_path_for_child "$child")"; then
+      packet_json="$(packet_matches_json "$packet_path" 2>/dev/null || printf '[]')"
+    else
+      packet_json='[]'
+    fi
+    build_child_result "$child" '[]' "evidence-only-packet" "evidence-only closure packet accepted (short-circuit)" "$packet_json" "pass"
+    return 0
   fi
 
   mapfile -t scoped_files < <(extract_scoped_files "$child")
@@ -462,15 +756,33 @@ classify_child() {
         if [[ -n "$grace_until" ]]; then
           commit_json="$(commit_matches_json "$created_at" "$grace_until" "${scoped_files[@]}")"
           if echo "$commit_json" | jq -e 'length > 0' >/dev/null 2>&1; then
-            build_child_result "$child" "$scoped_json" "commit" "matched scoped files in git history within grace window after close (close-before-commit)" "$commit_json" "pass"
+            build_child_result "$child" "$scoped_json" "grace-window" "matched scoped files in git history within grace window after close (close-before-commit)" "$commit_json" "pass"
             return 0
           fi
         fi
       fi
       if [[ "$SCOPE" == "commit" ]]; then
-        if [[ "${#scoped_files[@]}" -eq 0 ]]; then
-          build_child_result "$child" "$scoped_json" "none" "parser_miss: no scoped files extracted from description" '[]' "fail"
+        # Check evidence-only closure packets before declaring any miss.
+        # Maintenance epics that close via proof packets instead of code commits
+        # are valid regardless of whether scoped files were found.
+        if packet_path="$(durable_packet_path_for_child "$child")" && packet_is_valid_for_child "$packet_path" "$child"; then
+          packet_json="$(packet_matches_json "$packet_path")"
+          if [[ "${#scoped_files[@]}" -eq 0 ]]; then
+            build_child_result "$child" "$scoped_json" "evidence-only-packet" "matched durable closure proof packet (no scoped files)" "$packet_json" "pass"
+          else
+            build_child_result "$child" "$scoped_json" "evidence-only-packet" "matched durable closure proof packet (no commit evidence for scoped files)" "$packet_json" "pass"
+          fi
+        elif [[ "${#scoped_files[@]}" -eq 0 ]]; then
+          if description_has_file_patterns "$child"; then
+            build_child_result "$child" "$scoped_json" "none" "parser_miss: description mentions file-like paths but extraction found 0 scoped files — manual review recommended" '[]' "warn"
+          else
+            build_child_result "$child" "$scoped_json" "none" "parser_miss: no scoped files extracted from description" '[]' "fail"
+          fi
         else
+          if all_scoped_files_are_discovery "${scoped_files[@]}" && child_has_nondiscovery_proof_surface "$child"; then
+            build_child_result "$child" "$scoped_json" "discovery-seed-missing" "discovery_miss: closed bead cites discovery-phase artifact(s) (.agents/brainstorm/.agents/research/.agents/discovery/) that were never persisted, but other proof surface exists" '[]' "warn"
+            return 0
+          fi
           build_child_result "$child" "$scoped_json" "none" "timing_miss: scoped files found but no commit evidence (checked grace window)" '[]' "fail"
         fi
         return 0
@@ -479,7 +791,17 @@ classify_child() {
   esac
 
   if [[ "${#scoped_files[@]}" -eq 0 ]]; then
-    build_child_result "$child" "$scoped_json" "none" "parser_miss: no scoped files extracted from description" '[]' "fail"
+    # Check evidence-only closure packets before declaring parser_miss
+    if packet_path="$(durable_packet_path_for_child "$child")" && packet_is_valid_for_child "$packet_path" "$child"; then
+      packet_json="$(packet_matches_json "$packet_path")"
+      build_child_result "$child" "$scoped_json" "evidence-only-packet" "matched durable closure proof packet (no scoped files)" "$packet_json" "pass"
+    else
+      if description_has_file_patterns "$child"; then
+        build_child_result "$child" "$scoped_json" "none" "parser_miss: description mentions file-like paths but extraction found 0 scoped files — manual review recommended" '[]' "warn"
+      else
+        build_child_result "$child" "$scoped_json" "none" "parser_miss: no scoped files extracted from description" '[]' "fail"
+      fi
+    fi
     return 0
   fi
 
@@ -508,9 +830,20 @@ classify_child() {
   esac
 
   if packet_path="$(durable_packet_path_for_child "$child")" && packet_is_valid_for_child "$packet_path" "$child"; then
-    packet_mode="$(packet_evidence_mode "$packet_path")"
     packet_json="$(packet_matches_json "$packet_path")"
-    build_child_result "$child" "$scoped_json" "$packet_mode" "matched durable closure proof packet" "$packet_json" "pass"
+    build_child_result "$child" "$scoped_json" "evidence-only-packet" "matched durable closure proof packet" "$packet_json" "pass"
+    return 0
+  fi
+
+  # Discovery-phase seed artifacts (.agents/brainstorm/, .agents/research/,
+  # .agents/discovery/) are ephemeral and commonly not persisted. If EVERY
+  # scoped file is such a seed AND the bead has any other proof surface
+  # (commit referencing the bead id, evidence-only packet, plan/finding
+  # file, or non-discovery file mentioned in bead text with real history),
+  # downgrade to WARN (discovery_miss) instead of hard-failing. Non-discovery
+  # scoped misses still hard-fail.
+  if all_scoped_files_are_discovery "${scoped_files[@]}" && child_has_nondiscovery_proof_surface "$child"; then
+    build_child_result "$child" "$scoped_json" "discovery-seed-missing" "discovery_miss: closed bead cites discovery-phase artifact(s) (.agents/brainstorm/.agents/research/.agents/discovery/) that were never persisted, but other proof surface exists (commit-ref/packet/plan/finding)" '[]' "warn"
     return 0
   fi
 
@@ -563,14 +896,18 @@ jq -s \
     summary: {
       checked_children: length,
       passed: ([.[] | select(.status == "pass")] | length),
+      warned: ([.[] | select(.status == "warn")] | length),
       failed: ([.[] | select(.status == "fail")] | length),
       evidence_modes: {
         commit: ([.[] | select(.status == "pass" and .evidence_mode == "commit") | .child_id] | sort),
         staged: ([.[] | select(.status == "pass" and .evidence_mode == "staged") | .child_id] | sort),
         worktree: ([.[] | select(.status == "pass" and .evidence_mode == "worktree") | .child_id] | sort),
-        packet: ([.[] | select(.status == "pass" and (.evidence_mode | IN("commit","staged","worktree") | not)) | .child_id] | sort)
+        "evidence-only-packet": ([.[] | select(.status == "pass" and .evidence_mode == "evidence-only-packet") | .child_id] | sort),
+        "grace-window": ([.[] | select(.status == "pass" and .evidence_mode == "grace-window") | .child_id] | sort),
+        "discovery-seed-missing": ([.[] | select(.status == "warn" and .evidence_mode == "discovery-seed-missing") | .child_id] | sort)
       }
     },
     children: .,
-    failures: [.[] | select(.status == "fail") | {child_id, detail, failure_type: (if (.detail | startswith("parser_miss")) then "parser_miss" elif (.detail | startswith("timing_miss")) then "timing_miss" else "unknown" end)}]
+    warnings: [.[] | select(.status == "warn") | {child_id, detail, warning_type: (if (.detail | startswith("parser_miss")) then "parser_miss" elif (.detail | startswith("discovery_miss")) then "discovery_miss" else "unknown" end)}],
+    failures: [.[] | select(.status == "fail") | {child_id, detail, failure_type: (if (.detail | startswith("parser_miss")) then "parser_miss" elif (.detail | startswith("timing_miss")) then "timing_miss" elif (.detail | startswith("discovery_miss")) then "discovery_miss" else "unknown" end)}]
   }' "$tmp_results"

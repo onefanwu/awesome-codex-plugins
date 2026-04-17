@@ -28,7 +28,22 @@ in context windows. The wiki IS the retrieval layer.
 
 ## Pluggable Compute Backend
 
-When running headless, set `AGENTOPS_COMPILE_RUNTIME` to `ollama` or `openai` for the compilation backend.
+Set `AGENTOPS_COMPILE_RUNTIME` to pick the LLM backend:
+
+| Value | Backend | Notes |
+|-------|---------|-------|
+| `ollama` | Ollama API | Needs `OLLAMA_HOST` (default `http://localhost:11434`). |
+| `openai` | OpenAI-compatible | Needs `OPENAI_API_KEY`. |
+
+When unset, `ao compile` attempts to auto-detect a local CLI backend. If none
+is available, headless compile fails fast with an actionable error.
+
+### Large-corpus batching
+
+`ao compile --batch-size N` caps changed files per LLM prompt (default 25),
+so a 2000+ file corpus splits into batches instead of one giant prompt.
+Pair with `--max-batches N` to cap work per invocation; remaining files are
+picked up on the next run.
 
 ## Execution Steps
 
@@ -285,20 +300,48 @@ new learnings proposed, validations, knowledge gaps, and defrag summary.
 Lightweight defrag (prune + dedup, no mining or compilation) runs automatically at
 session end via the `compile-session-defrag.sh` hook.
 
-For full compilation, invoke `$compile` manually or schedule via cron.
+For full compilation, invoke `$compile` manually or schedule the headless
+compiler script with your host OS:
 
-## Flags
+```bash
+# Example: external cron entry for nightly compilation
+0 3 * * * cd /path/to/repo && AGENTOPS_COMPILE_RUNTIME=ollama bash skills-codex/compile/scripts/compile.sh --force
+```
+
+AgentOps exposes this flow through `ao compile`. If you want unattended
+compilation, use your host scheduler (`launchd`, `cron`, `systemd`, CI, etc.)
+to invoke `ao compile --force --runtime ollama` or call the lower-level
+`bash skills-codex/compile/scripts/compile.sh` directly.
+If you want the broader private overnight loop, use `ao overnight start`
+instead of inventing a parallel Dream wrapper inside `$compile`.
+
+## Interactive Modes
+
+These modes describe the interactive `$compile` skill behavior:
+
+| Mode | Description |
+|------|-------------|
+| `--compile-only` | Skip mine/grow, just compile + lint |
+| `--lint-only` | Only lint the existing compiled wiki |
+| `--defrag-only` | Only run defrag/cleanup |
+| `--mine-only` | Only run mine + grow (legacy behavior) |
+| `--full` | Full cycle: mine → grow → compile → lint → defrag |
+| `--since 26h` | Time window for the mine phase |
+| `--incremental` | Skip unchanged source files (hash-based) |
+| `--force` | Recompile all articles regardless of hashes |
+
+## Headless Script Flags
+
+For unattended runs, `bash skills-codex/compile/scripts/compile.sh` supports:
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--compile-only` | off | Skip mine/grow, just compile + lint |
-| `--lint-only` | off | Only run lint pass on existing wiki |
-| `--defrag-only` | off | Only run defrag/cleanup |
-| `--mine-only` | off | Only run mine + grow (legacy behavior) |
-| `--full` | on | Full cycle: mine → grow → compile → lint → defrag |
-| `--since` | `26h` | Time window for mine phase |
+| `--sources <dir>` | `.agents` | Source root for learnings, patterns, research, retros, forge, and knowledge |
+| `--output <dir>` | `.agents/compiled` | Target directory for compiled wiki output |
 | `--incremental` | on | Skip unchanged source files (hash-based) |
 | `--force` | off | Recompile all articles regardless of hashes |
+| `--lint-only` | off | Only run the lint pass on the existing compiled wiki |
+| `--full` | on | Accepted for parity; default behavior already runs the full headless compile path |
 
 ## Examples
 
@@ -325,6 +368,7 @@ For full compilation, invoke `$compile` manually or schedule via cron.
 
 ## Reference Documents
 
+- [references/phases.md](references/phases.md) — full per-phase procedure (mine → grow → compile → lint → defrag → report)
 - [references/confidence-scoring.md](references/confidence-scoring.md)
 - [references/flywheel-diagnostics.md](references/flywheel-diagnostics.md)
 - [references/knowledge-synthesis-patterns.md](references/knowledge-synthesis-patterns.md)

@@ -22,6 +22,20 @@ description: 'Epic decomposition into trackable issues. Triggers: "create a plan
 
 Given `$plan <goal> [--auto]`:
 
+### Step 0: Bead-Input Pre-Flight (Stale-Scope Gate)
+
+When the input to `$plan` is a bead ID (`[a-z]{2,6}-[0-9a-z.]+`) and the plan is full-complexity, older than 7 days, or inherited from a prior session, run `ao beads verify <bead-id>` before setup or decomposition.
+
+```bash
+if [[ "$INPUT" =~ ^[a-z]{2,6}-[0-9a-z.]+$ ]]; then
+    ao beads verify "$INPUT" || true
+fi
+```
+
+If verification reports STALE citations, stop planning in interactive mode and ask for scope re-validation. In `--auto` mode, log the stale-scope evidence into the plan/execution packet and do not decompose against stale evidence until the scope is refreshed against HEAD.
+
+This implements the shared stale-scope validation rule: inherited scope estimates must be re-validated against HEAD before acting on deferred beads, handoff docs, or prior-session plans.
+
 ### Step 1: Setup
 ```bash
 mkdir -p .agents/plans
@@ -80,6 +94,8 @@ Use the tracked contracts in `docs/contracts/finding-compiler.md` and `docs/cont
   - unreadable file -> warn once and continue without findings
 
 Use the selected planning rules / active findings as hard planning context before issue decomposition. Record the applied finding IDs and how they changed the plan. These become required context for the written plan, not optional side notes.
+
+Every written plan must include an `Applied findings:` line, even when the value is `none`.
 
 **Ranked packet contract:** Treat compiled planning rules, active findings, and matching high-severity `next-work.jsonl` items as one ranked packet, not three unrelated lookups. The packet must prefer the strongest overlap in this order:
 1. literal goal-text overlap
@@ -392,11 +408,30 @@ Group issues by dependencies for parallel execution:
 Unchecked rules: 0
 ```
 
-If any rule row has an empty Justification column, mark the plan output as **INCOMPLETE** and do not proceed to Step 6 until all rows are filled.
+If any rule row has an empty Justification column, mark the plan output as **INCOMPLETE** and do not proceed to Step 5.5 until all rows are filled.
+
+### Step 5.5: File Dependency Matrix (MANDATORY)
+
+Before writing the plan document, produce an explicit file-level dependency matrix mapping each task to every file it reads or writes. This matrix is the input to the swarm pre-spawn conflict check — without it, handoff to `$swarm` is blocked.
+
+| Task | File | Access | Notes |
+|------|------|--------|-------|
+| task-1 | cli/cmd/ao/foo.go | write | New function |
+| task-1 | cli/cmd/ao/foo_test.go | write | New test |
+| task-2 | cli/internal/bar/bar.go | read  | Calls Foo() |
+| task-2 | cli/cmd/ao/foo.go | read  | Caller |
+
+Rules:
+- Every `write` cell is an ownership claim. Two tasks claiming `write` on the same file in the same wave MUST be serialized (`blockedBy`) or merged into one task.
+- `read` does not conflict with other reads but DOES conflict with a concurrent `write` in the same wave.
+- Include tests, docs, schemas, fixtures, generated artifacts, and Codex companion files — not just primary sources.
+- Cross-reference: the swarm skill's local-mode reference (Pre-Spawn Conflict Check) consumes this matrix.
 
 #### File-Level Dependency Matrix (Mandatory)
 
-Before assigning issues to waves, build a file-conflict matrix. For EACH issue, list which files it modifies. If any file appears in 2+ same-wave issues, either:
+Before assigning issues to waves, build a file-conflict matrix. For EACH issue, list every touched file it modifies or regenerates, not just the primary source files. The inventory must include tests, docs, schemas, fixtures, runtime copies, generated references, parity manifests, hash markers, lockfiles, and other generated artifacts. If an exact generated path is not known yet, assign the smallest owning glob to the issue and replace it with concrete paths before worker dispatch.
+
+If any file appears in 2+ same-wave issues, either:
 - **Serialize** them (move one to a later wave), or
 - **Merge** them into a single issue assigned to one worker.
 
@@ -431,6 +466,24 @@ After computing waves, build a **cross-wave file registry** listing every file t
 3. For test files shared across waves, prefer splitting test additions into the same wave as the code they test — avoid a separate "test coverage" issue that touches files already modified in an earlier wave.
 
 **Why:** In na-vs9, Wave 2 agents started from pre-Wave-1 SHA. A Wave 2 test coverage issue overwrote Wave 1's `.md→.json` fix in `rpi_phased_test.go` because the worktree didn't include Wave 1's commit. The cross-wave registry makes these collisions visible during planning.
+
+#### Generated Artifact Companion Scope
+
+When a planned issue changes skill behavior, phrasing, orchestration, or UX under `skills/<name>/`, the same issue must explicitly plan the Codex runtime companion scope:
+
+- `skills-codex/<name>/` when the checked-in Codex artifact needs a body/script/reference change.
+- `skills-codex-overrides/<name>/` or `skills-codex-overrides/catalog.json` when the Codex-specific tailoring or treatment changes.
+- `skills-codex/.agentops-manifest.json` and `skills-codex/<name>/.agentops-generated.json` when artifact hashes need refresh.
+
+Record these files in the `## File-Conflict Matrix` with the source skill issue, not in a later generic cleanup wave. The issue's validation block must include:
+
+```bash
+bash scripts/refresh-codex-artifacts.sh --scope worktree
+bash scripts/validate-codex-generated-artifacts.sh --scope worktree
+bash scripts/audit-codex-parity.sh --skill <name>
+```
+
+If the skill behavior change definitely has no Codex-facing effect, write that as the matrix mitigation with evidence. Do not leave Codex artifact scope implicit.
 
 #### Validate Dependency Necessity
 

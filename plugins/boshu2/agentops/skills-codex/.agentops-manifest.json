@@ -2,7 +2,7 @@
   "generator": "manual-maintained",
   "source_root": "skills",
   "layout": "modular",
-  "codex_override_catalog_hash": "38570a2c4c74b32011f37aafbd7b363cbda05385dd2c283c4216082267394a1e",
+  "codex_override_catalog_hash": "ab4d30f0f4ad0f4b1b2423148d7e0361aac9d5a76ba730144eee6c04b01c9d41",
   "codex_override_catalog": {
     "version": 1,
     "description": "Machine-readable Codex treatment map for the full skill catalog.",
@@ -40,10 +40,28 @@
         "reason": "The canonical knowledge-cycle contract is already operationally specific; a bespoke Codex prompt is not justified yet."
       },
       {
+        "name": "llm-wiki",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "The proposal is a procedural external-knowledge workflow with no Codex-only runtime divergence yet."
+      },
+      {
+        "name": "autodev",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "Thin operator layer over the shipped ao autodev, ao evolve, and ao rpi contracts; converter parity is sufficient for the first rollout."
+      },
+      {
         "name": "beads",
         "treatment": "bespoke",
         "wave": "backbone",
         "reason": "Issue routing and dependency edits are a core Codex workflow and need explicit runtime-facing operator guidance."
+      },
+      {
+        "name": "bootstrap",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
       },
       {
         "name": "brainstorm",
@@ -92,6 +110,18 @@
         "treatment": "parity_only",
         "wave": "backbone",
         "reason": "Discovery delegates to sub-skills; default generated prompt is enough."
+      },
+      {
+        "name": "dream",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "The first Dream skill is a thin interactive layer over the shipped ao overnight contracts, so converter parity is sufficient."
+      },
+      {
+        "name": "design",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
       },
       {
         "name": "doc",
@@ -155,9 +185,22 @@
           "required_markers": [
             "Capture the current objective, completed work, unresolved blockers, and the next command or file to inspect.",
             "Prefer durable paths, issue ids, and validation evidence over conversational summaries.",
+            "Finish handoff-driven session closeout by running `ao codex ensure-stop --auto-extract`; the CLI already skips duplicate closeout for the same Codex thread.",
             "Do not leave the next session guessing what to do first."
           ]
         }
+      },
+      {
+        "name": "harvest",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "knowledge-activation",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "The canonical outer-loop contract is already Codex-ready for the first productized rollout."
       },
       {
         "name": "heal-skill",
@@ -177,6 +220,7 @@
             "## Guardrails"
           ],
           "required_markers": [
+            "In Codex hookless mode, run `ao codex ensure-start` before implementation begins; the CLI records startup once per thread and skips duplicates automatically.",
             "Work one claimed issue to completion with acceptance criteria, touched files, and validation steps kept explicit.",
             "Prefer TDD or the smallest proving test first when behavior changes, then widen validation only as needed.",
             "Do not widen scope beyond the claimed issue without creating a beads follow-up."
@@ -231,9 +275,11 @@
             "## Guardrails"
           ],
           "required_markers": [
-            "write learnings and harvested work to disk",
-            ".agents/rpi/next-work.jsonl",
-            "claim/release/consume through the queue lifecycle"
+            "Treat `skills/post-mortem/SKILL.md` as the canonical close-out contract and `skills-codex/post-mortem/SKILL.md` as the Codex-facing artifact.",
+            "Keep the council/validation summary concise, then write learnings and harvested work to disk.",
+            "Prefer concrete follow-up items that can flow directly into `.agents/rpi/next-work.jsonl` for the next Codex loop.",
+            "Own Codex closeout during the post-mortem flywheel phase by running `ao codex ensure-stop --auto-extract`; the CLI already skips duplicate closeout for the same Codex thread.",
+            "Keep harvested work machine-checkable: available on write, then claim/release/consume through the queue lifecycle."
           ]
         }
       },
@@ -305,6 +351,7 @@
           "required_markers": [
             "relevant tests first, commit second, push third, remote verification last",
             "branch is synced with origin at the end",
+            "Do not run `ao codex stop` after the remote push; finish session closeout before `$push` if the session is ending.",
             "If push fails, stay in recovery mode until it succeeds or a real blocker is identified"
           ]
         }
@@ -328,6 +375,12 @@
         "reason": "README generation benefits from Codex-specific interview brevity, artifact output, and validation focus."
       },
       {
+        "name": "red-team",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New adversarial validation skill; converter parity is acceptable."
+      },
+      {
         "name": "recover",
         "treatment": "bespoke",
         "wave": "core-execution",
@@ -339,8 +392,10 @@
             "## Guardrails"
           ],
           "required_markers": [
+            "Treat `skills/recover/SKILL.md` as the canonical recovery contract and `skills-codex/recover/SKILL.md` as the Codex-facing artifact.",
             "Rebuild state from files, issues, generated artifacts, and git state before trusting chat memory.",
             "Return recovery output in this order: `Resume Target`, `Evidence`, `Gaps or Conflicts`, `Next Step`.",
+            "In Codex hookless mode, run `ao codex ensure-start`; the CLI records startup once per thread and skips duplicates automatically.",
             "Make the `Next Step` directly executable by the current Codex session."
           ]
         }
@@ -359,6 +414,7 @@
           "required_markers": [
             "Keep the release boundary explicit: everything up to the tag, with validations and changelog evidence called out.",
             "Prefer deterministic command sequences and clear rollback points over narrative release notes during execution.",
+            "Do not run `ao codex stop` after the release commit/tag boundary; finish Codex closeout before `$release` if those artifacts must be part of the release boundary.",
             "Do not blur preparation work with post-tag publishing tasks."
           ]
         }
@@ -375,9 +431,10 @@
             "## Guardrails"
           ],
           "required_markers": [
+            "In Codex hookless mode, run `ao codex ensure-start` before research; the CLI records startup once per thread and skips duplicates automatically.",
             "Prefer `spawn_agent` / `send_input` / `wait` for parallel exploration.",
             "Write findings to `.agents/research/` with file-level references and concrete evidence.",
-            "Keep backend fallback logic explicit: codex sub-agents, then inline."
+            "Keep backend fallback logic explicit: codex sub-agents, then background-task-fallback, then inline."
           ]
         }
       },
@@ -405,9 +462,15 @@
             "## Guardrails"
           ],
           "required_markers": [
+            "In Codex hookless mode, run `ao codex ensure-start` before phase orchestration; the CLI records startup once per thread and skips duplicates automatically.",
+            "When beads are present, resolve bead IDs before routing; when beads are absent, preserve the current goal or execution-packet objective across phases.",
+            "Keep a single lifecycle objective spine across discovery, crank, and validation. Never replace it with a child issue ID or one ready slice from `bd ready`, `bd show`, or `.agents/rpi/next-work.jsonl`.",
+            "If discovery does not yield an epic id, invoke `$crank .agents/rpi/execution-packet.json` and standalone `$validation` instead of inventing one.",
+            "If `$crank` returns `<promise>PARTIAL</promise>`, rerun `$crank` on the same lifecycle objective until the work is done, blocked, or the retry budget is exhausted.",
             "Orchestrate phases directly in the current session; do not hand RPI orchestration to wrapper commands.",
             "claim, release, and consume semantics exactly",
-            "claim before work, consume on success, release on failure or interruption"
+            "claim before work, consume on success, release on failure or interruption",
+            "Do not stop after a partial phase result; only stop on `<promise>BLOCKED</promise>`, retry-budget exhaustion, or final completion."
           ]
         }
       },
@@ -447,6 +510,7 @@
             "## Guardrails"
           ],
           "required_markers": [
+            "In Codex hookless mode, run `ao codex ensure-start` before gathering dashboard state; the CLI records startup once per thread and skips duplicates automatically.",
             "Default to a one-screen layout with three blocks in this order: `Current Work`, `Latest Gates`, `Next Action`.",
             "Use exact issue ids, branch/worktree state, and file-backed artifacts instead of conversational summaries.",
             "Keep the output resumable after compaction."
@@ -512,6 +576,48 @@
             "lead with defects, risks, and verification gaps"
           ]
         }
+      },
+      {
+        "name": "deps",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "perf",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "refactor",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "review",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "scaffold",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "test",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "New lifecycle skill; converter parity is acceptable."
+      },
+      {
+        "name": "scenario",
+        "treatment": "parity_only",
+        "wave": "catalog-parity",
+        "reason": "Stage 4 behavioral validation skill; converter parity is acceptable."
       }
     ]
   },
@@ -520,13 +626,25 @@
       "name": "compile",
       "source_skill": "skills/compile",
       "source_hash": "16201db71f7c545f6169815d66606938bd8af90cc7b2d880cd53139e85a57fe5",
-      "generated_hash": "ce8f818f42085afb269c15de9bd0eddbb0aaa177583a4a61917a97f20e4d3055"
+      "generated_hash": "07c2371a4a775c7f3110393a1ebf148b6c3938457dbae8f0cb4e8d51665152dd"
+    },
+    {
+      "name": "llm-wiki",
+      "source_skill": "skills/llm-wiki",
+      "source_hash": "ce0067cba434406745d88c8e5909c812bd56efe519775c063588b68566593e5e",
+      "generated_hash": "86df32eebb25cb8d3f114604f346449b545ab75683745d5b6e49ff5f1aa4d4d0"
+    },
+    {
+      "name": "autodev",
+      "source_skill": "skills/autodev",
+      "source_hash": "2219fe4be60a7750d5523ee3c7fb78d70db5d24d514db5c0a830760c8e6e8b93",
+      "generated_hash": "42d10a3187cddf954a9f925949e495020c0e00fef7bcfe2d720f048e0a74c499"
     },
     {
       "name": "beads",
       "source_skill": "skills/beads",
       "source_hash": "80a5b9fd59c945be2ea4f5b7f25f5439948b931d2ee15553568c1fe223b8d9cb",
-      "generated_hash": "b2ed207e7f9df3e8eac9b7981483cdd91fab444b7b31e3ece603364baa972b4e"
+      "generated_hash": "77addf8d3acac6badbb4235295496060c55a01c9b686c8b8c231ef2ce2d760fc"
     },
     {
       "name": "bootstrap",
@@ -568,13 +686,13 @@
       "name": "council",
       "source_skill": "skills/council",
       "source_hash": "ffc20fd7f42b63af231a2d1a44df2edc33d78e4b6dd8cf0c7f2ee07e2ecf9f0d",
-      "generated_hash": "4dc70aa9c5ba22adbc767ac29975d162b6ed765505336cc13fed363d24d4c740"
+      "generated_hash": "ffbf70e80c5e780ac22b3740981482c5de6401fe3f412935bd9af02c0d90886b"
     },
     {
       "name": "crank",
       "source_skill": "skills/crank",
       "source_hash": "928d1301b7f3bf12607e779cdec279924b5b29d681faffd01e6819651def92e7",
-      "generated_hash": "b3aa1911ad41c0b92fffda8c1d709be6eabc0cb73204872d49f6827ad1c3066e"
+      "generated_hash": "63340a4214c757133c74ede362ed165cb55e32e1ca1909f0329d2155dc6e5695"
     },
     {
       "name": "deps",
@@ -595,6 +713,12 @@
       "generated_hash": "8a28eb03e22ab4b4a4442402211f4c279283111a699acc7c7426ac2645fa1356"
     },
     {
+      "name": "dream",
+      "source_skill": "skills/dream",
+      "source_hash": "28f5f4412bff2be75b748ecd8fd693a523a8977548506675693a95a1826bf122",
+      "generated_hash": "73b0415f29dd6f904ffe5a212e9aad667191acdd74e21ae34dc354f955ba6507"
+    },
+    {
       "name": "doc",
       "source_skill": "skills/doc",
       "source_hash": "9359b5c4c0f2f1f13a34e659effbbd359037f3c2391648c74355dca638207d84",
@@ -604,7 +728,7 @@
       "name": "evolve",
       "source_skill": "skills/evolve",
       "source_hash": "d6f47f2fe5d384d3c94143e120a056699c29a548bd391d93aa01d20b9a94dd6c",
-      "generated_hash": "43724c6c4d922cc69eab2a7aa7ccac6b94a697c51ee93d4b6cf6683466fd4c49"
+      "generated_hash": "8d2126ed48f1758cd7c48aed72df659e23ac7f408e53a1db78c80d4f1cafdbb8"
     },
     {
       "name": "flywheel",
@@ -616,13 +740,13 @@
       "name": "forge",
       "source_skill": "skills/forge",
       "source_hash": "286b17f44efe413b7b8514cefded51f7085e82bf9698cc41d0136337af66662d",
-      "generated_hash": "4a908ffd2965adcbe35bd8b165e336165c28018c41f388d41d3df260d16a001c"
+      "generated_hash": "4ae6bde43e0af7bc8974e4d0bbe973ca16c1175d6976fb4f8b81047ce5bd68ae"
     },
     {
       "name": "goals",
       "source_skill": "skills/goals",
       "source_hash": "3a2b714569c2378c300658f7796125275b18204a91d8e8eee252507f7c7caf91",
-      "generated_hash": "1f411f787f113f8381165ee5c14ac97a3f1e84ab3672a596f08ee555b7c45f60"
+      "generated_hash": "5a997da0b63a96a1bd8b2e4a4200228bd7b893d63a897f275c149247e4545b2b"
     },
     {
       "name": "grafana-platform-dashboard",
@@ -640,7 +764,7 @@
       "name": "harvest",
       "source_skill": "skills/harvest",
       "source_hash": "2487c8f10d74254ae38d468f10e05dde1405532ed1e8e8b364a7bca5a3469cdc",
-      "generated_hash": "3d81d15c2f9a27b0b130034bdba196af657e766023c10bda4533bf6b147f4adf"
+      "generated_hash": "6c50a57ee9cab6b6d18aa647c791f726fabf3092bb0dd912b88903bf57940fbf"
     },
     {
       "name": "heal-skill",
@@ -652,7 +776,7 @@
       "name": "implement",
       "source_skill": "skills/implement",
       "source_hash": "2ab197d1810fd3eb56f73aac4645c02edc01aa41e524064b12b993c6861ebc32",
-      "generated_hash": "2ed1918f55180687c573f54bbc052dc31d87387570f342f0fe7189824ab5b99c"
+      "generated_hash": "69fa694eaad00ead6eebce2590e981eca07660fba16887eb28f4e833e93eaf21"
     },
     {
       "name": "inject",
@@ -664,7 +788,7 @@
       "name": "knowledge-activation",
       "source_skill": "skills/knowledge-activation",
       "source_hash": "",
-      "generated_hash": "2b7128de2d1aaf33dd0de43c72e7f2be01c2744f0e567efe51a88194fe3c8fde"
+      "generated_hash": "799c5c521859702454d8872ccbbb7840479013f3b65e90e911315b6003e68a0a"
     },
     {
       "name": "openai-docs",
@@ -688,13 +812,13 @@
       "name": "plan",
       "source_skill": "skills/plan",
       "source_hash": "1a60effff3f0e9380dc55a0816dfb3256d0f5ad6d72d1a269c210668860184d9",
-      "generated_hash": "111773b9675383d03ae1208754a56f99f2d8acffcb5e8bf7a8ba77bd204d7bae"
+      "generated_hash": "d0d2f7731f419edff36aa0138cc2215474c85bdd523809ab93084cbb3503c6f5"
     },
     {
       "name": "post-mortem",
       "source_skill": "skills/post-mortem",
       "source_hash": "afce1fac76a1e506e9405b76886ecdf390c3eead5d863d82b8311286ad00d6a4",
-      "generated_hash": "153f8041fd03a5519c39dd8e0414b05335b8c635fd3856ffc3202dd26da2cf9c"
+      "generated_hash": "c62fcb739217ad8633f10ff27b5dd7a34ea1fae0bfea0a68705d0f140257b6cd"
     },
     {
       "name": "pr-implement",
@@ -736,7 +860,7 @@
       "name": "pre-mortem",
       "source_skill": "skills/pre-mortem",
       "source_hash": "9ed2f0290ccc16ce45a79d0a22b2dae54f525875fa2a8375bf470de54c08912d",
-      "generated_hash": "5864f9edd205eebe053fbae60ad27fecb0c856768e76077c859739d09aa89c5d"
+      "generated_hash": "4230419d7de3654a97c15233f45c1542f291f6ab1ca39752b040bc12b58e7e94"
     },
     {
       "name": "product",
@@ -760,7 +884,7 @@
       "name": "quickstart",
       "source_skill": "skills/quickstart",
       "source_hash": "68a6463ab7dded893cbdd27d7697c70d871ed4149b5c7cbe8bf20369c1e0a813",
-      "generated_hash": "caad3a0d6ae274b6c121cd41efd9045e7d354a5e51df99fc7bfeececa455599e"
+      "generated_hash": "92759426fabae70bba9045ff448df760e9a7470b8395310018a8e78957949b20"
     },
     {
       "name": "ratchet",
@@ -807,8 +931,8 @@
     {
       "name": "retro",
       "source_skill": "skills/retro",
-      "source_hash": "4cf265d7ee5b71ac33e7039aeb58c899a02b8721b3a998e96151641d7e9b6d3c",
-      "generated_hash": "37f6188b3c25a7c21109d38aa3ade6d5b233bf2834c240052d2814d455802d54"
+      "source_hash": "766c677cdceb6b891805b9d865a6f5df547a6220d1824dfa2e5c1aead5ec1bca",
+      "generated_hash": "09e1cb6541b54695fcbe01daba1d77da50325a39e5ad56a2146d8d11f2c21bfc"
     },
     {
       "name": "reverse-engineer-rpi",
@@ -820,7 +944,7 @@
       "name": "review",
       "source_skill": "skills/review",
       "source_hash": "41592e863522cb5476c85e5edc5dfbb021cd62bc1b540ec69e0b8afe76e83d83",
-      "generated_hash": "b37648bc5f4c93b19d9c327817f17e56e38637cde2254eeb5f2b4adb10fb17a0"
+      "generated_hash": "1f9e69836548848fcae06d9fab5e6c8af05a8cc796d671ba813aa896f2d76279"
     },
     {
       "name": "rpi",
@@ -838,7 +962,7 @@
       "name": "scenario",
       "source_skill": "skills/scenario",
       "source_hash": "5795f67b06b9240dfeb017a4621180f119583878fcb80946863c32209ae885b6",
-      "generated_hash": "50740a551582b280ec08bd07a361edddb2b133ee6e75f149838c30ac0963e54f"
+      "generated_hash": "4fa87bab94929801c40ebe889c75f28950e59cc26452fdf9631d257b7c539e66"
     },
     {
       "name": "security",
@@ -855,14 +979,14 @@
     {
       "name": "shared",
       "source_skill": "skills/shared",
-      "source_hash": "fae3fdfbcf93b80358c6f43fc58a1cfbbbf86bca197f66997b7d276c635fe1ca",
-      "generated_hash": "ed2b35c4c3fcfcb92bfb8291489338bdf3f0219c816cbb751f90e2968b939909"
+      "source_hash": "3955166ea6cde6ec5d09e4d8a7f11a7c8303a28c1bab8029ba5e752bd5006cbb",
+      "generated_hash": "a9deb4f1aeeb6f7371c548fb8174b185ff90ab4390f34a43618b13d6de0d06ee"
     },
     {
       "name": "standards",
       "source_skill": "skills/standards",
       "source_hash": "837a4c5f624c5de7dbe37193fb1671a97d2f4c9381355c4b3745e247b632577a",
-      "generated_hash": "cc703708e9f3bc108b361094bc549f05b75bb6e675cc72952fe69f83bc0588ee"
+      "generated_hash": "33afeca1a2dc5ba35f1fec148563937f4730d83f17b414cf71e2c40cfab5b68b"
     },
     {
       "name": "status",
@@ -874,7 +998,7 @@
       "name": "swarm",
       "source_skill": "skills/swarm",
       "source_hash": "fe5abbc8873c805485273cc85d2d480c615f8f016fa14445f8c170bcfabd0fdf",
-      "generated_hash": "ff431d1ed777720a6bbbfe64b2bbcaae921b4aefe1ed74a0b4221e303eaf9871"
+      "generated_hash": "8c5b47adb342c37244a0e344269c08ec3ef1ebe5d101b908d78b8bc64bae77a9"
     },
     {
       "name": "test",
@@ -897,14 +1021,14 @@
     {
       "name": "using-agentops",
       "source_skill": "skills/using-agentops",
-      "source_hash": "7f5cc28fcf68821caddf4fbb323e630fc3be0c32ad46121086a7be3e2b5752b3",
-      "generated_hash": "42024a95370f66df23b73d1f0ac2c355eb1a23826ca788807a467437aecd436b"
+      "source_hash": "3bd9f321938894b24fe718defc99b65939d52a0ca42ad422e003004a39fbbe6c",
+      "generated_hash": "f4cd8f27c5b3ff1c92f77961b54312c0d2d2e3c47ded9701d62baf82d6a82490"
     },
     {
       "name": "validation",
       "source_skill": "skills/validation",
       "source_hash": "2e71f8dbe94c65971f0dff7f82ac83396649ff036bbea388060174945f660c5c",
-      "generated_hash": "24b75c8b2feb0ebca1443a479794891d0f48147e04b5b8dd1fa24973cd8a2cd9"
+      "generated_hash": "04c7521bc6e5d801f05092c41794ebbd3bd00b6f89b83f366a5201bdb46f874a"
     },
     {
       "name": "vibe",

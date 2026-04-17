@@ -1,6 +1,6 @@
 ---
 name: element14
-description: Search Newark, Farnell, and element14 for electronic components — find parts by MPN or distributor part number, check pricing/stock, download datasheets, analyze specifications. One unified API covers all three storefronts (Newark for US, Farnell for UK/EU, element14 for APAC). Free API key, simple query-parameter auth, no OAuth. Datasheets download directly from farnell.com CDN with no bot protection. Sync and maintain a local datasheets directory for a KiCad project. Use this skill when the user mentions Newark, Farnell, element14, needs parts from a non-US distributor, wants to compare pricing across regions, or needs datasheets from a source that doesn't require complex API auth. For package cross-reference tables and BOM workflow, see the `bom` skill.
+description: Search Newark, Farnell, and element14 for electronic components — find parts by MPN or distributor part number, check pricing/stock, download datasheets, analyze specifications. One unified API covers all three storefronts (Newark for US, Farnell for UK/EU, element14 for APAC). Free API key, simple query-parameter auth, no OAuth. Datasheets download directly from farnell.com CDN with no bot protection. Sync and maintain a local datasheets directory for a KiCad project, or use batch MPN-list seeding (`--mpn-list`) for bulk workflows without a project. Use this skill when the user mentions Newark, Farnell, element14, needs parts from a non-US distributor, wants to compare pricing across regions, or needs datasheets from a source that doesn't require complex API auth. For package cross-reference tables and BOM workflow, see the `bom` skill.
 ---
 
 # element14 / Newark / Farnell — Component Search, Datasheets & Ordering
@@ -185,7 +185,7 @@ element14's farnell.com CDN serves datasheet PDFs directly — no bot protection
 
 ### Datasheet Directory Sync
 
-Use `sync_datasheets_element14.py` to maintain a `datasheets/` directory alongside a KiCad project. Same workflow and `index.json` format as the DigiKey, Mouser, and LCSC skills.
+Use `sync_datasheets_element14.py` to maintain a `datasheets/` directory alongside a KiCad project. Same workflow and `manifest.json` format as the DigiKey, Mouser, and LCSC skills.
 
 ```bash
 # Sync datasheets for a KiCad project
@@ -205,14 +205,26 @@ python3 <skill-path>/scripts/sync_datasheets_element14.py <file.kicad_sch> -o ./
 
 # Parallel downloads (3 workers)
 python3 <skill-path>/scripts/sync_datasheets_element14.py <file.kicad_sch> --parallel 3
+
+# Batch mode — sync from a plain MPN list (no KiCad project required)
+python3 <skill-path>/scripts/sync_datasheets_element14.py --mpn-list mpns.txt --output ./datasheets
 ```
+
+**MPN-list batch mode** (KH-312) — when you have a list of MPNs but no
+KiCad project to point at. One MPN per line; blank lines and `#`
+comments (full-line and inline) are skipped; generic values are filtered
+via `is_real_mpn()` and de-duplicated. Output defaults to `./datasheets/`
+in the current working directory when `--output` is omitted. Note:
+`ELEMENT14_API_KEY` is still required even in dry-run mode; see the
+v1.4 follow-up in the issue tracker if dry-run credential-independence
+matters for your workflow.
 
 The script:
 - **Runs the kicad schematic analyzer** to extract components, MPNs, and distributor PNs
 - **Accepts any identifier** — MPN, Newark/Farnell PN, or other distributor PNs from KiCad symbol properties
 - **Prefers MPN search** (`manuPartNum:`) for exact match — falls back to keyword search
 - **Downloads from farnell.com CDN** — direct PDF URLs, no bot protection
-- **Writes `index.json` manifest** — same format as DigiKey/Mouser/LCSC skills
+- **Writes `manifest.json` manifest** — same format as DigiKey/Mouser/LCSC skills
 - **Verifies PDF content** — checks MPN, manufacturer, and description keywords
 - **Rate-limited** — 0.5s between API calls (configurable with `--delay`)
 - **Saves progress incrementally** — safe to interrupt

@@ -5,7 +5,7 @@
 <h1 align="center">brooks-lint</h1>
 
 <p align="center">
-  <strong>AI code reviews grounded in six classic engineering books.<br>
+  <strong>AI code reviews grounded in twelve classic engineering books.<br>
   Consistent. Traceable. Actionable.</strong>
 </p>
 
@@ -17,7 +17,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.7.0-blue.svg" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License">
   <img src="https://img.shields.io/badge/Claude_Code-Plugin-blueviolet.svg" alt="Claude Code Plugin">
   <img src="https://img.shields.io/badge/Codex_CLI-Skill-orange.svg" alt="Codex CLI Skill">
@@ -31,9 +31,12 @@
 
 **50 years later, Brooks was still right — and so were McConnell, Fowler, Martin, Hunt & Thomas, Evans, Ousterhout, Winters, Meszaros, Osherove, Feathers, and the Google Testing team.**
 
-Most code quality tools count lines and cyclomatic complexity. **brooks-lint** goes deeper — it diagnoses your code against six decay risk dimensions synthesized from ten classic engineering books, producing structured findings with book citations, severity labels, and concrete remedies every time.
+Most code quality tools count lines and cyclomatic complexity. **brooks-lint** goes deeper — it diagnoses your code against six decay risk dimensions synthesized from twelve classic engineering books, producing structured findings with book citations, severity labels, and concrete remedies every time.
 
-## The Ten Books
+For the full source-to-skill mapping, including exceptions and false-positive guards, see
+[`skills/_shared/source-coverage.md`](skills/_shared/source-coverage.md).
+
+## The Twelve Books
 
 | Book | Author | Contributes to |
 |------|--------|----------------|
@@ -45,12 +48,14 @@ Most code quality tools count lines and cyclomatic complexity. **brooks-lint** g
 | *Domain-Driven Design* | Eric Evans | R1, R3, R6 |
 | *A Philosophy of Software Design* | John Ousterhout | R1, R4 |
 | *Software Engineering at Google* | Winters, Manshreck & Wright | R2, R5 |
+| *The Art of Unit Testing* | Roy Osherove | T1, T2, T4, T5 |
+| *How Google Tests Software* | James A. Whittaker, Jason Arbon & Jeff Carollo | T5, T6 |
 | *Working Effectively with Legacy Code* | Michael Feathers | T4, T5, T6 |
 | *xUnit Test Patterns* | Gerard Meszaros | T1, T2, T3, T4 |
 
 ## The Six Decay Risks
 
-brooks-lint evaluates your code across **six decay risk dimensions** synthesized from ten classic engineering books:
+brooks-lint evaluates your code across **six production-code decay risks** and **six test-suite decay risks** synthesized from twelve classic engineering books:
 
 | Decay Risk | Diagnostic Question | Sources |
 |------------|---------------------|---------|
@@ -137,7 +142,7 @@ graph TD
     class UserService,UserController,Database clean
 ```
 
-The graph renders natively in GitHub, VS Code, and Notion — no extra tools needed.
+The graph renders natively in GitHub, Notion, and other Markdown environments — no extra tools needed.
 
 ## See More Examples
 
@@ -187,9 +192,14 @@ The gap isn't what Claude *can* find — it's what it *consistently* finds, with
 /plugin install brooks-lint@brooks-lint-marketplace
 ```
 
+Short-form commands (`/brooks-review`) are auto-installed on first session start. To install manually:
+```bash
+cp commands/*.md ~/.claude/commands/
+```
+
 #### Manual Install
 ```bash
-cp -r skills/brooks-lint ~/.claude/skills/brooks-lint
+cp -r skills/ ~/.claude/skills/brooks-lint
 ```
 
 ### Gemini CLI
@@ -201,7 +211,7 @@ cp -r skills/brooks-lint ~/.claude/skills/brooks-lint
 
 #### Manual Install
 ```bash
-cp -r skills/brooks-lint ~/.gemini/skills/brooks-lint
+cp -r skills/ ~/.gemini/skills/brooks-lint
 ```
 
 ### Codex CLI
@@ -214,25 +224,28 @@ Install the brooks-lint skill from hyhmrright/brooks-lint
 #### Command Line
 ```bash
 python3 ~/.codex/skills/.system/skill-installer/scripts/install-skill-from-github.py \
-  --repo hyhmrright/brooks-lint --path skills/brooks-lint --name brooks-lint
+  --repo hyhmrright/brooks-lint --path skills --name brooks-lint
 ```
 
 #### Manual Install
 ```bash
 git clone https://github.com/hyhmrright/brooks-lint.git /tmp/brooks-lint
 mkdir -p ~/.codex/skills/brooks-lint
-cp -r /tmp/brooks-lint/skills/brooks-lint/* ~/.codex/skills/brooks-lint/
+cp -r /tmp/brooks-lint/skills/* ~/.codex/skills/brooks-lint/
 ```
 
 ## Slash Commands
 
 ### Claude Code
-| Short command | Full command | Action |
-|---------------|-------------|--------|
-| `/brooks-review` | `/brooks-lint:brooks-review` | PR-level code review |
-| `/brooks-audit` | `/brooks-lint:brooks-audit` | Full architecture audit |
-| `/brooks-debt` | `/brooks-lint:brooks-debt` | Tech debt assessment |
-| `/brooks-test` | `/brooks-lint:brooks-test` | Test suite health review |
+| Command | Short Form | Action |
+|---------|------------|--------|
+| `/brooks-lint:brooks-review` | `/brooks-review` | PR-level code review |
+| `/brooks-lint:brooks-audit` | `/brooks-audit` | Full architecture audit |
+| `/brooks-lint:brooks-debt` | `/brooks-debt` | Tech debt assessment |
+| `/brooks-lint:brooks-test` | `/brooks-test` | Test suite health review |
+| `/brooks-lint:brooks-health` | `/brooks-health` | Health dashboard — all four dimensions |
+
+> Short-form commands are auto-installed on first session start by the session-start hook.
 
 ### Gemini CLI
 | Command | Action |
@@ -241,21 +254,28 @@ cp -r /tmp/brooks-lint/skills/brooks-lint/* ~/.codex/skills/brooks-lint/
 | `/brooks-audit` | Full architecture audit |
 | `/brooks-debt` | Tech debt assessment |
 | `/brooks-test` | Test suite health review |
+| `/brooks-health` | Health dashboard — all four dimensions |
 
 ### Codex CLI
 
-Activate the skill with `$brooks-lint`, then describe the task. Mode is auto-detected from context.
+| Command | Action |
+|---------|--------|
+| `$brooks-review` | PR-level code review |
+| `$brooks-audit` | Full architecture audit |
+| `$brooks-debt` | Tech debt assessment |
+| `$brooks-test` | Test suite health review |
+| `$brooks-health` | Health dashboard — all four dimensions |
 
-The skill also triggers automatically when you discuss code quality, architecture, maintainability, or test health.
+The skills also trigger automatically when you discuss code quality, architecture, maintainability, or test health.
 
 ## Usage
 
 ### PR Review
 
 ```
-/brooks-lint:brooks-review          # Claude Code
-/brooks-review                      # Gemini CLI
-$brooks-lint                        # Codex CLI (then say "review this PR")
+/brooks-review                      # Claude Code (short form) / Gemini CLI
+/brooks-lint:brooks-review          # Claude Code (full form)
+$brooks-review                      # Codex CLI
 ```
 
 Paste a diff or point the AI at changed files. Diagnoses each of the six decay risks with specific findings in Symptom → Source → Consequence → Remedy format.
@@ -263,9 +283,9 @@ Paste a diff or point the AI at changed files. Diagnoses each of the six decay r
 ### Architecture Audit
 
 ```
-/brooks-lint:brooks-audit           # Claude Code
-/brooks-audit                       # Gemini CLI
-$brooks-lint                        # Codex CLI (then say "audit the architecture")
+/brooks-audit                       # Claude Code (short form) / Gemini CLI
+/brooks-lint:brooks-audit           # Claude Code (full form)
+$brooks-audit                       # Codex CLI
 ```
 
 Describe your project structure or share key files. It maps module dependencies, identifies circular dependencies, and checks Conway's Law alignment.
@@ -273,9 +293,9 @@ Describe your project structure or share key files. It maps module dependencies,
 ### Tech Debt Assessment
 
 ```
-/brooks-lint:brooks-debt            # Claude Code
-/brooks-debt                        # Gemini CLI
-$brooks-lint                        # Codex CLI (then say "assess tech debt")
+/brooks-debt                        # Claude Code (short form) / Gemini CLI
+/brooks-lint:brooks-debt            # Claude Code (full form)
+$brooks-debt                        # Codex CLI
 ```
 
 Classifies your debt across the six decay risks, scores each finding by Pain × Spread priority, and produces a prioritized repayment roadmap with Critical / Scheduled / Monitored classification.
@@ -283,12 +303,22 @@ Classifies your debt across the six decay risks, scores each finding by Pain × 
 ### Test Quality Review
 
 ```
-/brooks-lint:brooks-test            # Claude Code
-/brooks-test                        # Gemini CLI
-$brooks-lint                        # Codex CLI (then say "review test quality")
+/brooks-test                        # Claude Code (short form) / Gemini CLI
+/brooks-lint:brooks-test            # Claude Code (full form)
+$brooks-test                        # Codex CLI
 ```
 
 Audits your test suite against six test-space decay risks — Test Obscurity, Test Brittleness, Test Duplication, Mock Abuse, Coverage Illusion, and Architecture Mismatch — sourced from xUnit Test Patterns, The Art of Unit Testing, How Google Tests Software, and Working Effectively with Legacy Code. PR reviews also include a lightweight Step 7 Quick Test Check automatically.
+
+### Health Dashboard
+
+```
+/brooks-health                      # Claude Code (short form) / Gemini CLI
+/brooks-lint:brooks-health          # Claude Code (full form)
+$brooks-health                      # Codex CLI
+```
+
+Runs abbreviated scans across all four quality dimensions and produces a weighted composite Health Score (0–100). Use it before a release, when onboarding a new team, or whenever you want a big-picture "how are we doing?" report. For deeper diagnosis on any dimension, use the focused skill instead.
 
 ## Configuration
 
@@ -298,7 +328,7 @@ Place a `.brooks-lint.yaml` in your project root to customize review behavior:
 version: 1
 
 disable:
-  - T3   # skip coverage metrics check — we don't enforce coverage
+  - T5   # skip coverage metrics check — we don't enforce coverage
 
 severity:
   R1: suggestion   # downgrade Cognitive Overload findings for this domain
@@ -327,7 +357,7 @@ In the age of AI-assisted coding, we're writing more code faster than ever. But 
 > *"The complexity of software is an essential property, not an accidental one."*
 > — Frederick Brooks
 
-AI can help you write code faster, but it can't tell you whether you're building a cathedral or a tar pit. **brooks-lint bridges that gap** — it brings the hard-won wisdom of six classic engineering books into your modern development workflow.
+AI can help you write code faster, but it can't tell you whether you're building a cathedral or a tar pit. **brooks-lint bridges that gap** — it brings the hard-won wisdom of twelve classic engineering books into your modern development workflow.
 
 The decay risks these authors identified are more relevant than ever:
 - **Adding AI assistants** doesn't fix cognitive overload or domain model distortion
@@ -340,21 +370,67 @@ The decay risks these authors identified are more relevant than ever:
 brooks-lint/
 ├── .claude-plugin/              # Claude Code plugin metadata
 ├── .codex-plugin/               # Codex CLI plugin metadata
-├── skills/brooks-lint/          # The skill itself (canonical source)
-│   ├── SKILL.md                 # Main skill — Iron Law, mode detection, report template
-│   ├── decay-risks.md           # Six decay risks with symptoms and book citations
-│   ├── pr-review-guide.md       # Mode 1: PR review process (incl. Step 7 Quick Test Check)
-│   ├── architecture-guide.md    # Mode 2: Architecture audit + Conway's Law
-│   ├── debt-guide.md            # Mode 3: Pain×Spread scoring + Debt Summary Table
-│   ├── test-decay-risks.md      # Six test-space decay risks with book citations
-│   └── test-guide.md            # Mode 4: Test quality review process
+├── skills/
+│   ├── _shared/                 # Shared framework files
+│   │   ├── common.md            # Iron Law, Project Config, Report Template, Health Score
+│   │   ├── source-coverage.md   # 12-book coverage matrix, tradeoffs, false-positive guards
+│   │   ├── decay-risks.md       # Six decay risks with symptoms and book citations
+│   │   └── test-decay-risks.md  # Six test-space decay risks with book citations
+│   ├── brooks-review/           # Mode 1: PR Review
+│   │   ├── SKILL.md
+│   │   └── pr-review-guide.md
+│   ├── brooks-audit/            # Mode 2: Architecture Audit
+│   │   ├── SKILL.md
+│   │   └── architecture-guide.md
+│   ├── brooks-debt/             # Mode 3: Tech Debt Assessment
+│   │   ├── SKILL.md
+│   │   └── debt-guide.md
+│   ├── brooks-test/             # Mode 4: Test Quality Review
+│   │   ├── SKILL.md
+│   │   └── test-guide.md
+│   └── brooks-health/           # Mode 5: Health Dashboard
+│       ├── SKILL.md
+│       └── health-guide.md
 ├── hooks/                       # SessionStart hook
-├── commands/                    # /brooks-review, /brooks-audit, /brooks-debt, /brooks-test
+├── commands/                    # Short-form command wrappers (auto-installed by hook)
 ├── evals/                       # Benchmark test cases
 │   └── evals.json
 └── assets/
     └── logo.svg
 ```
+
+## CI/CD Integration
+
+Automate brooks-lint on every PR using the GitHub Action:
+
+```yaml
+# .github/workflows/brooks-lint.yml
+name: Brooks-Lint PR Review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  brooks-lint:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: hyhmrright/brooks-lint/.github/actions/brooks-lint@main
+        with:
+          mode: review
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          fail-below: 70
+```
+
+See [`docs/github-action-example.yml`](docs/github-action-example.yml) for the full template.
+
+The action posts the review as a PR comment and optionally fails the check if the Health Score drops below a threshold. If `.brooks-lint-history.json` is committed to your repo, the comment also includes a trend delta (e.g., "85 → 82 (−3) over last 3 runs").
+
+**Cost:** ~$0.05–0.15 per PR run depending on diff size and model. Recommend running on `pull_request` events only.
 
 ## Roadmap
 
@@ -363,9 +439,10 @@ brooks-lint/
 - [x] **v0.4**: Six-book framework, decay risk dimensions, diagnosis chain, benchmark suite
 - [x] **v0.5**: Test Quality Review (Mode 4) — four testing books, six test decay risks
 - [x] **v0.6**: Mermaid dependency graph in Architecture Audit
-- [x] **v0.7**: `.brooks-lint.yaml` project config, Mode 2 proactive context, 10-book expansion, short-form commands
-- [ ] **v0.8**: GitHub Action for CI/CD integration
-- [ ] **v1.0**: VS Code extension
+- [x] **v0.7**: `.brooks-lint.yaml` project config, Mode 2 proactive context, 10-book expansion
+- [x] **v0.8**: Independent skill architecture with namespaced commands
+- [x] **v0.9**: Step validation, auto-diff scope, `/brooks-health` dashboard, trend tracking, triage mode, `--fix` remedies, onboarding report, GitHub Action
+- [x] **v1.0**: Eval automation (`run-evals-live.mjs`), custom risk extension (`Cx` codes)
 
 Want to help? The best contributions right now are new eval test cases and improved decay risk symptom patterns. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -373,7 +450,7 @@ Want to help? The best contributions right now are new eval test cases and impro
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add findings, improve guides, or expand the benchmark suite.
 
-Run `/brooks-lint:brooks-review` on your own PR — we review contributions with the tool we're building.
+Run `/brooks-review` on your own PR — we review contributions with the tool we're building.
 
 ## License
 
@@ -381,17 +458,19 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-This project stands on the shoulders of ten giants:
+This project stands on the shoulders of twelve giants:
 
-**Code Quality Framework (v0.4)**
+**Production Code Framework**
 - Frederick P. Brooks Jr. — *The Mythical Man-Month* (1975, Anniversary Edition 1995)
 - Steve McConnell — *Code Complete* (1993, 2nd ed. 2004)
 - Martin Fowler — *Refactoring* (1999, 2nd ed. 2018)
 - Robert C. Martin — *Clean Architecture* (2017)
 - Andrew Hunt & David Thomas — *The Pragmatic Programmer* (1999, 20th Anniversary Ed. 2019)
 - Eric Evans — *Domain-Driven Design* (2003)
+- John Ousterhout — *A Philosophy of Software Design* (2018)
+- Titus Winters, Tom Manshreck, and Hyrum Wright — *Software Engineering at Google* (2020)
 
-**Test Quality Framework (v0.5)**
+**Test Quality Framework**
 - Gerard Meszaros — *xUnit Test Patterns* (2007)
 - Roy Osherove — *The Art of Unit Testing* (2009, 3rd ed. 2023)
 - Google Engineering — *How Google Tests Software* (2012)

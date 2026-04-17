@@ -28,7 +28,7 @@ def _classify_component(comp: dict, regulator_refs: set,
     """Classify a component into an architecture cluster.
 
     Uses multiple signals in priority order:
-    1. Known regulator refs from signal_analysis.power_regulators
+    1. Known regulator refs from findings (detect_power_regulators)
     2. Component type field (most reliable)
     3. Library ID keywords (fallback)
 
@@ -132,17 +132,19 @@ class ArchitectureGenerator:
         if not components:
             return None
 
-        signal_analysis = analysis.get('signal_analysis', {})
+        # Build detector-keyed lookup from flat findings[]
+        from finding_schema import Det, group_findings
+        _sa = group_findings(analysis)
 
         # Collect regulator refs from signal analysis
         regulator_refs = {
-            r['ref'] for r in signal_analysis.get('power_regulators', [])
+            r['ref'] for r in _sa.get(Det.POWER_REGULATORS, [])
             if isinstance(r, dict) and r.get('ref')
         }
 
         # Collect protection (ESD) device refs
         protection_refs: set[str] = set()
-        for e in signal_analysis.get('esd_coverage_audit', []):
+        for e in _sa.get(Det.ESD_AUDIT, []):
             if isinstance(e, dict):
                 for dev in e.get('esd_devices', []):
                     if isinstance(dev, dict) and dev.get('ref'):

@@ -9,6 +9,8 @@ Zero external dependencies — Python 3.8+ stdlib only.
 
 from __future__ import annotations
 
+from finding_schema import Det, group_findings
+
 
 # ======================================================================
 # Utility
@@ -79,10 +81,13 @@ def _extract_overview_data(analysis: dict, **kwargs) -> str:
     return '\n'.join(parts) if parts else 'No system overview data available.'
 
 
+
+
 def _extract_power_data(analysis: dict, **kwargs) -> str:
     """Extract power design data as concise text summary."""
     parts = []
-    regs = analysis.get('signal_analysis', {}).get('power_regulators', [])
+    _sa = group_findings(analysis)
+    regs = _sa.get(Det.POWER_REGULATORS, [])
     if regs:
         parts.append(f"{len(regs)} voltage regulator(s):")
         for r in regs:
@@ -120,7 +125,7 @@ def _extract_power_data(analysis: dict, **kwargs) -> str:
 
             parts.append(line)
 
-    decoupling = analysis.get('signal_analysis', {}).get('decoupling_analysis', [])
+    decoupling = _sa.get(Det.DECOUPLING, [])
     if decoupling:
         if isinstance(decoupling, list) and decoupling:
             total_caps = sum(len(d.get('capacitors', [])) for d in decoupling
@@ -137,7 +142,7 @@ def _extract_power_data(analysis: dict, **kwargs) -> str:
             parts.append(f"Decoupling: {decoupling.get('total_caps', 0)} capacitor(s)")
 
     # Protection devices
-    protection = analysis.get('signal_analysis', {}).get('protection_devices', [])
+    protection = _sa.get(Det.PROTECTION_DEVICES, [])
     if protection:
         parts.append(f"Protection devices: {len(protection)}")
         for p in protection[:5]:
@@ -162,7 +167,8 @@ def _extract_signal_data(analysis: dict, **kwargs) -> str:
                 parts.append(f"{bus_type.upper()} {bus_id}: {', '.join(sig_names[:10])}")
 
     # Level shifters
-    shifters = analysis.get('signal_analysis', {}).get('level_shifters', [])
+    _sa = group_findings(analysis)
+    shifters = _sa.get(Det.LEVEL_SHIFTERS, [])
     if shifters:
         parts.append(f"Level shifters: {len(shifters)}")
         for s in shifters:
@@ -170,7 +176,7 @@ def _extract_signal_data(analysis: dict, **kwargs) -> str:
                          f"({s.get('low_side_rail', '?')} <-> {s.get('high_side_rail', '?')})")
 
     # ESD coverage
-    esd = analysis.get('signal_analysis', {}).get('esd_coverage_audit', [])
+    esd = _sa.get(Det.ESD_AUDIT, [])
     if esd:
         unprotected = [e for e in esd if isinstance(e, dict) and e.get('coverage') == 'none']
         if unprotected:
@@ -195,10 +201,10 @@ def _extract_signal_data(analysis: dict, **kwargs) -> str:
 def _extract_analog_data(analysis: dict, **kwargs) -> str:
     """Extract analog design data as concise text summary."""
     parts = []
-    sa = analysis.get('signal_analysis', {})
+    sa = group_findings(analysis)
 
     # Voltage dividers
-    dividers = sa.get('voltage_dividers', [])
+    dividers = sa.get(Det.VOLTAGE_DIVIDERS, [])
     if dividers:
         parts.append(f"{len(dividers)} voltage divider(s):")
         for d in dividers:
@@ -221,7 +227,7 @@ def _extract_analog_data(analysis: dict, **kwargs) -> str:
                 parts.append(f"    connects to: {conn_str}")
 
     # Filters
-    for ftype, label in [('rc_filters', 'RC filter'), ('lc_filters', 'LC filter')]:
+    for ftype, label in [(Det.RC_FILTERS, 'RC filter'), (Det.LC_FILTERS, 'LC filter')]:
         filters = sa.get(ftype, [])
         if filters:
             parts.append(f"{len(filters)} {label}(s):")
@@ -230,7 +236,7 @@ def _extract_analog_data(analysis: dict, **kwargs) -> str:
                 c = f.get('capacitor', {})
                 r_ref = r.get('ref', '?') if isinstance(r, dict) else str(r)
                 c_ref = c.get('ref', '?') if isinstance(c, dict) else str(c)
-                fc = f.get('cutoff_hz') or f.get('fc_hz')
+                fc = f.get('cutoff_hz')
                 fc_str = _format_freq(fc) if fc else '?'
                 parts.append(
                     f"  - {f.get('type', '?')}: {r_ref} + {c_ref}, "
@@ -239,7 +245,7 @@ def _extract_analog_data(analysis: dict, **kwargs) -> str:
                 )
 
     # Opamp circuits
-    opamps = sa.get('opamp_circuits', [])
+    opamps = sa.get(Det.OPAMP_CIRCUITS, [])
     if opamps:
         parts.append(f"{len(opamps)} opamp circuit(s):")
         for o in opamps:
@@ -249,7 +255,7 @@ def _extract_analog_data(analysis: dict, **kwargs) -> str:
             )
 
     # Crystal circuits
-    crystals = sa.get('crystal_circuits', [])
+    crystals = sa.get(Det.CRYSTAL_CIRCUITS, [])
     if crystals:
         parts.append(f"{len(crystals)} crystal circuit(s):")
         for c in crystals:
@@ -379,13 +385,16 @@ def _extract_pcb_data(analysis: dict, **kwargs) -> str:
     if copper_layers:
         parts.append(f"Layer names: {', '.join(l.get('name', '?') for l in copper_layers)}")
 
-    # DFM
-    dfm = pcb_data.get('dfm_analysis', {})
-    violations = dfm.get('violations', [])
-    if violations:
-        parts.append(f"\nDFM violations: {len(violations)}")
-        for v in violations[:5]:
-            parts.append(f"  - {v.get('type', '?')}: {v.get('message', '?')}")
+    # DFM — violations are now in findings[], summary in dfm_summary
+    dfm_summary = pcb_data.get('dfm_summary', {})
+    dfm_violations = [f for f in pcb_data.get('findings', [])
+                      if isinstance(f, dict) and f.get('category') == 'dfm']
+    if dfm_violations:
+        parts.append(f"\nDFM violations: {len(dfm_violations)}")
+        for v in dfm_violations[:5]:
+            parts.append(f"  - {v.get('rule_id', '?')}: {v.get('summary', v.get('message', '?'))}")
+    elif dfm_summary.get('violation_count', 0) > 0:
+        parts.append(f"\nDFM violations: {dfm_summary['violation_count']}")
 
     return '\n'.join(parts)
 
@@ -425,16 +434,16 @@ def _extract_bom_data(analysis: dict, **kwargs) -> str:
 def _extract_test_data(analysis: dict, **kwargs) -> str:
     """Extract test and debug data as concise text summary."""
     parts = []
-    sa = analysis.get('signal_analysis', {})
+    sa = group_findings(analysis)
 
-    debug = sa.get('debug_interfaces', [])
+    debug = sa.get(Det.DEBUG_INTERFACES, [])
     if debug:
         parts.append(f"{len(debug)} debug interface(s):")
         for d in debug:
             parts.append(f"  - {d.get('ref', '?')}: {d.get('type', '?')} ({d.get('protocol', '?')})")
 
     # LED indicators
-    leds = sa.get('led_audit', [])
+    leds = sa.get(Det.LED_AUDIT, [])
     if leds:
         parts.append(f"{len(leds)} LED indicator(s)")
 
@@ -466,7 +475,7 @@ def _extract_executive_data(analysis: dict, **kwargs) -> str:
         parts.append(f"Key ICs: {', '.join(c.get('value', '?') for c in ics[:5])}")
 
     # Power summary
-    regs = analysis.get('signal_analysis', {}).get('power_regulators', [])
+    regs = group_findings(analysis).get(Det.POWER_REGULATORS, [])
     if regs:
         rails = []
         for r in regs:
@@ -524,7 +533,7 @@ def _extract_compliance_data(analysis: dict, **kwargs) -> str:
             f"Critical: {summary.get('critical', 0)}, High: {summary.get('high', 0)}"
         )
 
-    esd = analysis.get('signal_analysis', {}).get('esd_coverage_audit', [])
+    esd = group_findings(analysis).get(Det.ESD_AUDIT, [])
     if esd:
         unprotected = [e for e in esd if isinstance(e, dict) and e.get('coverage') == 'none']
         parts.append(f"ESD: {len(esd)} connectors audited, {len(unprotected)} unprotected")

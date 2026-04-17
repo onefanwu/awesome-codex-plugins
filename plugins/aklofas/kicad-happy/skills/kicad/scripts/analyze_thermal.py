@@ -35,7 +35,7 @@ DEFAULT_RTHETA_JA = 150.0  # Conservative fallback °C/W
 MIN_PDISS_W = 0.01  # 10mW threshold — below this, thermal is negligible
 
 SEVERITY_WEIGHTS = {
-    'CRITICAL': 15, 'HIGH': 8, 'MEDIUM': 3, 'LOW': 1, 'INFO': 0,
+    'error': 15, 'warning': 3, 'info': 0,
 }
 MAX_FINDINGS_PER_RULE = 5
 
@@ -145,6 +145,8 @@ def _get_datasheet_thermal(mpn: str, extract_dir: str) -> dict:
     """Look up thermal data from datasheet extraction cache.
 
     Returns dict with optional keys: tj_max_c, temp_max_c.
+    Rejects extractions with quality score < 6.0 (matches the trust
+    gate used by datasheet_verify.py and spice_spec_fetcher.py).
     """
     if not mpn or not extract_dir:
         return {}
@@ -158,6 +160,12 @@ def _get_datasheet_thermal(mpn: str, extract_dir: str) -> dict:
         with open(path) as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
+        return {}
+
+    # Trust gate: reject low-quality extractions (matches
+    # datasheet_verify.py and spice_spec_fetcher.py threshold)
+    meta = data.get("meta", {})
+    if meta.get("extraction_score", 0) < 6.0:
         return {}
 
     result = {}
@@ -187,12 +195,13 @@ def _estimate_all_power_dissipation(schematic: dict) -> list:
     Only includes components with P > MIN_PDISS_W.
     """
     results = []
-    signal = schematic.get("signal_analysis", {})
+    regulators = [f for f in schematic.get("findings", [])
+                  if f.get("detector") == "detect_power_regulators"]
     power_budget = schematic.get("power_budget", {})
     seen_refs = set()
 
     # 1. Linear regulators (LDOs) — use pre-computed power_dissipation
-    for reg in signal.get("power_regulators", []):
+    for reg in regulators:
         ref = reg.get("ref", "")
         topology = reg.get("topology", "").lower()
         pdiss = reg.get("power_dissipation", {})
@@ -208,6 +217,7 @@ def _estimate_all_power_dissipation(schematic: dict) -> list:
                     "pdiss_source": (f"({pdiss.get('vin_estimated_V', '?')}V - "
                                      f"{pdiss.get('vout_V', '?')}V) × "
                                      f"{pdiss.get('estimated_iout_A', '?')}A"),
+                    "pdiss_confidence": "heuristic",
                     "vin_v": pdiss.get("vin_estimated_V"),
                     "vout_v": pdiss.get("vout_V"),
                     "iout_a": pdiss.get("estimated_iout_A"),
@@ -215,7 +225,7 @@ def _estimate_all_power_dissipation(schematic: dict) -> list:
                 seen_refs.add(ref)
 
     # 2. Switching regulators — estimate from efficiency
-    for reg in signal.get("power_regulators", []):
+    for reg in regulators:
         ref = reg.get("ref", "")
         if ref in seen_refs:
             continue
@@ -247,13 +257,16 @@ def _estimate_all_power_dissipation(schematic: dict) -> list:
                 "type": "switching_reg",
                 "pdiss_w": round(p_loss, 4),
                 "pdiss_source": f"{vout}V × {iout_a:.3f}A × (1/{eta:.0%} - 1)",
+                "pdiss_confidence": "heuristic",
                 "vout_v": vout,
                 "iout_a": iout_a,
             })
             seen_refs.add(ref)
 
     # 3. Current sense shunt resistors — P = I²R
-    for cs in signal.get("current_sense", []):
+    current_sense = [f for f in schematic.get("findings", [])
+                     if f.get("detector") == "detect_current_sense"]
+    for cs in current_sense:
         shunt = cs.get("shunt", {})
         if not isinstance(shunt, dict):
             continue
@@ -273,6 +286,7 @@ def _estimate_all_power_dissipation(schematic: dict) -> list:
                 "type": "shunt_resistor",
                 "pdiss_w": round(p_w, 4),
                 "pdiss_source": f"{i_max:.3f}A² × {r_ohms}Ω",
+                "pdiss_confidence": "deterministic",
             })
             seen_refs.add(ref)
 
@@ -295,9 +309,12 @@ def _get_pcb_thermal_correction(ref: str, pcb: dict) -> dict:
         "notes": [],
     }
 
-    # Check thermal_pad_vias for this component
-    for tpv in pcb.get("thermal_pad_vias", []):
+    # Check thermal_pad_vias findings for this component
+    # (entries live in findings[] with detector="analyze_thermal_pad_vias")
+    for tpv in pcb.get("findings", []):
         if not isinstance(tpv, dict):
+            continue
+        if tpv.get("detector") != "analyze_thermal_pad_vias":
             continue
         if tpv.get("component") != ref:
             continue
@@ -322,9 +339,9 @@ def _get_pcb_thermal_correction(ref: str, pcb: dict) -> dict:
             result["notes"].append("thermal pad but no vias")
         break
 
-    # Check thermal_analysis.thermal_pads for additional info
-    thermal = pcb.get("thermal_analysis", {})
-    for tp in thermal.get("thermal_pads", []):
+    # Check thermal_pads findings for nearby via info
+    # (entries from thermal_analysis also live in findings[])
+    for tp in pcb.get("findings", []):
         if not isinstance(tp, dict):
             continue
         if tp.get("component") != ref:
@@ -399,6 +416,7 @@ def _compute_junction_temps(power_comps: list, pcb: dict,
             "component_type": comp["type"],
             "pdiss_w": pdiss,
             "pdiss_source": comp.get("pdiss_source", ""),
+            "pdiss_confidence": comp.get("pdiss_confidence", "heuristic"),
             "package": pkg_name,
             "rtheta_ja_raw": round(pkg_rtheta, 1),
             "rtheta_ja_source": rtheta_source,
@@ -411,6 +429,19 @@ def _compute_junction_temps(power_comps: list, pcb: dict,
             "tj_max_source": tj_max_source,
             "margin_c": round(margin, 1),
             "position": position,
+            "detector": "analyze_thermal",
+            "rule_id": "TH-DET",
+            "category": "thermal",
+            "severity": "info",
+            "confidence": "heuristic" if rtheta_source == "default" else "deterministic",
+            "evidence_source": "datasheet" if rtheta_source == "package_table" else "heuristic_rule",
+            "summary": f"Thermal: {ref} Tj={round(tj, 1)}C (margin {round(margin, 1)}C)",
+            "description": f"Component {ref} in {pkg_name} package: Tj={round(tj, 1)}C, margin {round(margin, 1)}C to Tj_max ({tj_max}C).",
+            "components": [ref],
+            "nets": [],
+            "pins": [],
+            "recommendation": "",
+            "report_context": {"section": "Thermal", "impact": "", "standard_ref": ""},
         })
 
     # Sort by Tj descending (hottest first)
@@ -444,13 +475,15 @@ def _generate_findings(assessments: list) -> list:
         pdiss = a["pdiss_w"]
         pkg = a["package"]
         confidence = _thermal_confidence(a)
+        ev_source = ("datasheet" if a.get("rtheta_ja_source") == "package_table"
+                     else "heuristic_rule")
 
         label = f"{ref} ({val})" if val else ref
 
         if tj > tj_max:
             findings.append({
                 "category": "thermal_safety",
-                "severity": "CRITICAL",
+                "severity": "error",
                 "rule_id": "TS-001",
                 "confidence": confidence,
                 "title": f"{label} estimated Tj {tj:.0f}°C exceeds abs max {tj_max:.0f}°C",
@@ -465,11 +498,17 @@ def _generate_findings(assessments: list) -> list:
                     "thermal path (add thermal vias, larger copper pour), or use "
                     "a more efficient topology (switching regulator instead of LDO)."
                 ),
+                "detector": "analyze_thermal",
+                "summary": f"{label} estimated Tj {tj:.0f}°C exceeds abs max {tj_max:.0f}°C",
+                "nets": [],
+                "pins": [],
+                "evidence_source": ev_source,
+                "report_context": {"section": "Thermal Safety", "impact": "Component reliability", "standard_ref": ""},
             })
         elif margin < 15:
             findings.append({
                 "category": "thermal_safety",
-                "severity": "HIGH",
+                "severity": "error",
                 "rule_id": "TS-002",
                 "confidence": confidence,
                 "title": f"{label} estimated Tj {tj:.0f}°C — only {margin:.0f}°C margin to abs max",
@@ -485,11 +524,17 @@ def _generate_findings(assessments: list) -> list:
                     "Consider improving thermal path or reducing input-output "
                     "voltage differential."
                 ),
+                "detector": "analyze_thermal",
+                "summary": f"{label} estimated Tj {tj:.0f}°C — only {margin:.0f}°C margin to abs max",
+                "nets": [],
+                "pins": [],
+                "evidence_source": ev_source,
+                "report_context": {"section": "Thermal Safety", "impact": "Component reliability", "standard_ref": ""},
             })
         elif tj > 85:
             findings.append({
                 "category": "thermal_safety",
-                "severity": "MEDIUM",
+                "severity": "warning",
                 "rule_id": "TS-003",
                 "confidence": confidence,
                 "title": f"{label} estimated Tj {tj:.0f}°C may affect nearby components",
@@ -505,11 +550,17 @@ def _generate_findings(assessments: list) -> list:
                     "capacitance at this temperature. Consider spacing "
                     "temperature-sensitive components away from heat source."
                 ),
+                "detector": "analyze_thermal",
+                "summary": f"{label} estimated Tj {tj:.0f}°C may affect nearby components",
+                "nets": [],
+                "pins": [],
+                "evidence_source": ev_source,
+                "report_context": {"section": "Thermal Safety", "impact": "Component reliability", "standard_ref": ""},
             })
         elif pdiss > 0.1:
             findings.append({
                 "category": "thermal_safety",
-                "severity": "INFO",
+                "severity": "info",
                 "rule_id": "TS-005",
                 "confidence": confidence,
                 "title": f"{label} Tj {tj:.0f}°C, margin {margin:.0f}°C",
@@ -519,6 +570,12 @@ def _generate_findings(assessments: list) -> list:
                 ),
                 "components": [ref],
                 "recommendation": "",
+                "detector": "analyze_thermal",
+                "summary": f"{label} Tj {tj:.0f}°C, margin {margin:.0f}°C",
+                "nets": [],
+                "pins": [],
+                "evidence_source": ev_source,
+                "report_context": {"section": "Thermal Safety", "impact": "Component reliability", "standard_ref": ""},
             })
 
     # TS-004: High-power component with no thermal vias
@@ -529,7 +586,7 @@ def _generate_findings(assessments: list) -> list:
             label = f"{ref} ({val})" if val else ref
             findings.append({
                 "category": "thermal_safety",
-                "severity": "MEDIUM",
+                "severity": "warning",
                 "rule_id": "TS-004",
                 "confidence": "deterministic",
                 "title": f"{label} dissipates {a['pdiss_w']:.2f}W with no thermal vias",
@@ -543,6 +600,12 @@ def _generate_findings(assessments: list) -> list:
                     "Add thermal vias under the component's thermal pad or "
                     "exposed pad. Minimum 5 vias for QFN, more for larger pads."
                 ),
+                "detector": "analyze_thermal",
+                "summary": f"{label} dissipates {a['pdiss_w']:.2f}W with no thermal vias",
+                "nets": [],
+                "pins": [],
+                "evidence_source": "geometry",
+                "report_context": {"section": "Thermal Safety", "impact": "Component reliability", "standard_ref": ""},
             })
 
     return findings
@@ -595,7 +658,7 @@ def _check_thermal_proximity(assessments: list, pcb: dict) -> list:
             if cap["is_electrolytic"]:
                 findings.append({
                     "category": "thermal_proximity",
-                    "severity": "MEDIUM",
+                    "severity": "warning",
                     "rule_id": "TP-002",
                     "confidence": "deterministic",
                     "title": (f"Electrolytic {cap['ref']} ({cap['value']}) "
@@ -611,11 +674,19 @@ def _check_thermal_proximity(assessments: list, pcb: dict) -> list:
                         "Move capacitor away from heat source or use a "
                         "ceramic capacitor rated for higher temperature."
                     ),
+                    "detector": "analyze_thermal",
+                    "summary": (f"Electrolytic {cap['ref']} ({cap['value']}) "
+                                f"is {dist:.1f}mm from {hot_label} "
+                                f"(Tj={hot['tj_estimated_c']:.0f}°C)"),
+                    "nets": [],
+                    "pins": [],
+                    "evidence_source": "geometry",
+                    "report_context": {"section": "Thermal Proximity", "impact": "Component reliability", "standard_ref": ""},
                 })
             else:
                 findings.append({
                     "category": "thermal_proximity",
-                    "severity": "LOW",
+                    "severity": "info",
                     "rule_id": "TP-001",
                     "confidence": "deterministic",
                     "title": (f"MLCC {cap['ref']} is {dist:.1f}mm from "
@@ -631,6 +702,13 @@ def _check_thermal_proximity(assessments: list, pcb: dict) -> list:
                         "at the elevated temperature, or use C0G/NP0 "
                         "dielectric for temperature-critical applications."
                     ),
+                    "detector": "analyze_thermal",
+                    "summary": (f"MLCC {cap['ref']} is {dist:.1f}mm from "
+                                f"{hot_label} (Tj={hot['tj_estimated_c']:.0f}°C)"),
+                    "nets": [],
+                    "pins": [],
+                    "evidence_source": "geometry",
+                    "report_context": {"section": "Thermal Proximity", "impact": "Component reliability", "standard_ref": ""},
                 })
 
     return findings
@@ -648,11 +726,11 @@ def compute_thermal_score(findings: list) -> int:
         by_rule.setdefault(rule, []).append(f)
 
     penalty = 0
-    sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'INFO': 4}
+    sev_order = {'error': 0, 'warning': 1, 'info': 2}
     for rule, rule_findings in by_rule.items():
-        rule_findings.sort(key=lambda f: sev_order.get(f.get('severity', 'INFO'), 4))
+        rule_findings.sort(key=lambda f: sev_order.get(f.get('severity', 'info'), 3))
         for f in rule_findings[:MAX_FINDINGS_PER_RULE]:
-            penalty += SEVERITY_WEIGHTS.get(f.get('severity', 'INFO'), 0)
+            penalty += SEVERITY_WEIGHTS.get(f.get('severity', 'info'), 0)
 
     return max(0, min(100, 100 - penalty))
 
@@ -713,7 +791,8 @@ def format_text_report(result: dict) -> str:
     lines.append(f"Total dissipation: {total_p:.3f}W")
     lines.append("")
 
-    lines.append(f"Total checks:  {summary.get('total_checks', 0)}")
+    lines.append(f"Total findings:      {summary.get('total_findings', 0)}")
+    lines.append(f"Components assessed: {summary.get('components_assessed', 0)}")
     lines.append(f"  CRITICAL:    {summary.get('critical', 0)}")
     lines.append(f"  HIGH:        {summary.get('high', 0)}")
     lines.append(f"  MEDIUM:      {summary.get('medium', 0)}")
@@ -768,9 +847,9 @@ def main():
     parser = argparse.ArgumentParser(
         description="Thermal hotspot estimator for KiCad designs"
     )
-    parser.add_argument("--schematic", "-s", required=True,
+    parser.add_argument("--schematic", "-s",
                         help="Schematic analyzer JSON (from analyze_schematic.py)")
-    parser.add_argument("--pcb", "-p", required=True,
+    parser.add_argument("--pcb", "-p",
                         help="PCB analyzer JSON (from analyze_pcb.py)")
     parser.add_argument("--output", "-o",
                         help="Output JSON file path (default: stdout)")
@@ -782,7 +861,51 @@ def main():
                         help="Path to datasheets/extracted/ directory")
     parser.add_argument("--config", default=None,
                         help="Path to .kicad-happy.json project config file")
+    parser.add_argument("--analysis-dir",
+                        help="Write thermal.json to this directory (analysis folder convention)")
+    parser.add_argument("--schema", action="store_true",
+                        help="Print JSON output schema and exit")
+    parser.add_argument('--stage', default=None,
+                        choices=['schematic', 'layout', 'pre_fab', 'bring_up'],
+                        help='Filter findings by review stage')
+    parser.add_argument('--audience', default=None,
+                        choices=['designer', 'reviewer', 'manager'],
+                        help='Audience level for summaries and --text output')
     args = parser.parse_args()
+
+    if args.schema:
+        schema = {
+            "analyzer_type": "string — always 'thermal'",
+            "schema_version": "string — semver (currently '1.3.0')",
+            "summary": {
+                "total_findings": "int",
+                "components_assessed": "int",
+                "active": "int — non-suppressed findings",
+                "suppressed": "int",
+                "critical": "int — deprecated, retained for consumer compat",
+                "high": "int — deprecated, retained for consumer compat",
+                "medium": "int — deprecated, retained for consumer compat",
+                "low": "int — deprecated, retained for consumer compat",
+                "info": "int — deprecated, retained for consumer compat",
+                "by_severity": "{error: int, warning: int, info: int}",
+                "thermal_score": "float (0-100)",
+            },
+            "findings": "[{detector, rule_id, category, severity, confidence, evidence_source, summary, description, components, nets, pins, recommendation, report_context}] — TS-001..005, TP-001..002, TH-DET assessments",
+            "trust_summary": {
+                "total_findings": "int",
+                "trust_level": "'high' | 'mixed' | 'low'",
+                "by_confidence": "{deterministic: int, heuristic: int, datasheet-backed: int}",
+                "by_evidence_source": "{datasheet|topology|heuristic_rule|symbol_footprint|bom|geometry|api_lookup: int}",
+                "provenance_coverage_pct": "float",
+            },
+            "elapsed_s": "float — analysis wall-clock time",
+            "missing_info": "OPTIONAL — {default_rtheta_ja: [ref], default_tj_max: [ref]} when any component used default thermal parameters",
+        }
+        print(json.dumps(schema, indent=2))
+        sys.exit(0)
+
+    if not args.schematic or not args.pcb:
+        parser.error("the --schematic and --pcb arguments are required (except with --schema)")
 
     # Load inputs
     try:
@@ -790,6 +913,13 @@ def main():
             schematic = json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         print(f"Error reading schematic: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if 'signal_analysis' in schematic and 'findings' not in schematic:
+        print(f'Error: {args.schematic} uses the pre-v1.3 '
+              f'signal_analysis wrapper format.\n'
+              f'Re-run analyze_schematic.py to produce the current '
+              f'findings[] format.', file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -802,10 +932,14 @@ def main():
     # Resolve datasheets directory
     extract_dir = args.datasheets
     if not extract_dir:
-        sch_file = schematic.get("file", "")
-        if sch_file:
-            candidate = os.path.join(os.path.dirname(sch_file),
-                                     "datasheets", "extracted")
+        # Prefer directory of actual input file over path stored inside JSON
+        input_path = args.schematic if hasattr(args, 'schematic') and args.schematic else None
+        search_base = os.path.dirname(os.path.abspath(input_path)) if input_path else None
+        if not search_base:
+            sch_file = schematic.get("file", "")
+            search_base = os.path.dirname(sch_file) if sch_file else None
+        if search_base:
+            candidate = os.path.join(search_base, "datasheets", "extracted")
             if os.path.isdir(candidate):
                 extract_dir = candidate
 
@@ -815,8 +949,12 @@ def main():
         if args.config:
             config = load_config_from_path(args.config)
         else:
-            sch_file = schematic.get("file", "")
-            search = os.path.dirname(sch_file) if sch_file else "."
+            input_path = args.schematic if hasattr(args, 'schematic') and args.schematic else None
+            if input_path:
+                search = os.path.dirname(os.path.abspath(input_path))
+            else:
+                sch_file = schematic.get("file", "")
+                search = os.path.dirname(sch_file) if sch_file else "."
             config = load_config(search)
     except ImportError:
         config = {"version": 1, "project": {}, "suppressions": []}
@@ -849,12 +987,18 @@ def main():
     score = compute_thermal_score(
         [f for f in findings if not f.get("suppressed")])
 
-    # Severity counts
-    counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFO": 0}
+    # Severity counts over the rule findings (thermal_assessments are
+    # merged into findings[] further down and contribute info-level
+    # entries — a final recompute below keeps summary in sync with the
+    # merged list).
+    counts = {"error": 0, "warning": 0, "info": 0}
     suppressed_count = 0
     for f in findings:
-        sev = f.get("severity", "INFO")
-        counts[sev] = counts.get(sev, 0) + 1
+        sev = str(f.get("severity", "info")).lower()
+        if sev in counts:
+            counts[sev] += 1
+        else:
+            counts["info"] += 1
         if f.get("suppressed"):
             suppressed_count += 1
 
@@ -875,15 +1019,16 @@ def main():
         missing_info["default_tj_max"] = default_tjmax
 
     result = {
+        "analyzer_type": "thermal",
+        "schema_version": "1.3.0",
         "summary": {
-            "total_checks": len(findings),
+            "total_findings": len(findings),
+            "components_assessed": len(assessments),
             "active": len(findings) - suppressed_count,
             "suppressed": suppressed_count,
-            "critical": counts["CRITICAL"],
-            "high": counts["HIGH"],
-            "medium": counts["MEDIUM"],
-            "low": counts["LOW"],
-            "info": counts["INFO"],
+            # Standardized severity rollup (single source — raw
+            # per-severity aliases were removed in v1.3 Batch 20).
+            "by_severity": dict(counts),
             "thermal_score": score,
             **board,
         },
@@ -894,14 +1039,77 @@ def main():
     if missing_info:
         result["missing_info"] = missing_info
 
+    # Merge thermal_assessments into findings (TH-DET entries)
+    result["findings"] = result.get("findings", []) + result.pop("thermal_assessments", [])
+
+    # Recompute summary from the merged findings list — the earlier
+    # `counts` block only saw rule findings, not the TH-DET assessments
+    # we just appended. Keep the envelope consistent with findings[].
+    _merged = result.get("findings", [])
+    _merged_counts = {"error": 0, "warning": 0, "info": 0}
+    _merged_suppressed = 0
+    for _f in _merged:
+        if not isinstance(_f, dict):
+            continue
+        _s = str(_f.get("severity", "info")).lower()
+        if _s in _merged_counts:
+            _merged_counts[_s] += 1
+        else:
+            _merged_counts["info"] += 1
+        if _f.get("suppressed"):
+            _merged_suppressed += 1
+    result["summary"]["total_findings"] = len(_merged)
+    result["summary"]["by_severity"] = _merged_counts
+    result["summary"]["active"] = len(_merged) - _merged_suppressed
+    result["summary"]["suppressed"] = _merged_suppressed
+
+    from finding_schema import compute_trust_summary
+    result["trust_summary"] = compute_trust_summary(result["findings"])
+
+    from output_filters import apply_output_filters
+    apply_output_filters(result, args.stage, args.audience)
+
+    # Determine output path
+    output_path = args.output
+    analysis_dir_mode = (not output_path
+                         and hasattr(args, "analysis_dir")
+                         and args.analysis_dir)
+
     # Output
-    if args.output:
-        with open(args.output, "w") as f:
+    if analysis_dir_mode:
+        # Route into the current run folder via the manifest. Falls back to
+        # writing at the analysis-dir root if nothing is tracked yet (first
+        # ever run — shouldn't happen since schematic/pcb precede thermal,
+        # but be defensive).
+        import tempfile
+        from analysis_cache import overwrite_current, CANONICAL_OUTPUTS, get_current_run
+        analysis_dir = args.analysis_dir
+        if not os.path.isabs(analysis_dir):
+            analysis_dir = os.path.abspath(analysis_dir)
+        filename = CANONICAL_OUTPUTS.get("thermal", "thermal.json")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_out = os.path.join(tmp_dir, filename)
+            with open(tmp_out, "w") as f:
+                json.dump(result, f, indent=2)
+            overwrite_current(analysis_dir, tmp_dir, source_hashes=None)
+        current = get_current_run(analysis_dir)
+        if current:
+            out_path = os.path.join(current[0], filename)
+        else:
+            out_path = os.path.join(analysis_dir, filename)
+        print(f"Thermal analysis complete: {len(findings)} findings "
+              f"(score {score}/100) -> {out_path}", file=sys.stderr)
+    elif output_path:
+        with open(output_path, "w") as f:
             json.dump(result, f, indent=2)
         print(f"Thermal analysis complete: {len(findings)} findings "
-              f"(score {score}/100) -> {args.output}", file=sys.stderr)
+              f"(score {score}/100) -> {output_path}", file=sys.stderr)
     elif args.text:
-        print(format_text_report(result))
+        if args.audience:
+            from output_filters import format_text
+            print(format_text(result.get('findings', []), args.audience, args.stage))
+        else:
+            print(format_text_report(result))
     else:
         json.dump(result, sys.stdout, indent=2)
         print(file=sys.stdout)

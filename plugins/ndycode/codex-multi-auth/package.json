@@ -1,6 +1,6 @@
 {
 	"name": "codex-multi-auth",
-	"version": "1.2.6",
+	"version": "1.3.0",
 	"description": "Multi-account OAuth manager and codex auth wrapper for the official @openai/codex CLI, with switching, health checks, and recovery tools",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -87,7 +87,7 @@
 		"test:model-matrix:report": "node scripts/test-model-matrix.js --smoke --report-json=.tmp/model-matrix-report.json",
 		"clean:repo": "node scripts/repo-hygiene.js clean --mode aggressive",
 		"clean:repo:check": "node scripts/repo-hygiene.js check",
-		"pack:check": "node scripts/check-pack-budget.mjs",
+		"pack:check": "npm run build && node scripts/check-pack-budget.mjs",
 		"bench:edit-formats": "node scripts/benchmark-edit-formats.mjs --preset=codex-core",
 		"bench:edit-formats:smoke": "node scripts/benchmark-edit-formats.mjs --smoke --preset=codex-core",
 		"bench:edit-formats:render": "node scripts/benchmark-render-dashboard.mjs",
@@ -154,17 +154,17 @@
 	"dependencies": {
 		"@codex-ai/plugin": "file:vendor/codex-ai-plugin",
 		"@openauthjs/openauth": "^0.4.3",
-		"hono": "4.12.10",
+		"hono": "4.12.14",
 		"undici": "^6.24.1",
 		"zod": "^4.3.6"
 	},
 	"overrides": {
-		"hono": "4.12.10",
+		"hono": "4.12.14",
 		"flatted": "3.4.2",
 		"minimatch": "10.2.4",
 		"picomatch": "4.0.4",
 		"rollup": "4.59.0",
-		"vite": "^7.3.1",
+		"vite": "^7.3.2",
 		"micromatch": {
 			"picomatch": "2.3.2"
 		},

@@ -1,6 +1,7 @@
 # Langfuse MCP Server
 
 [![PyPI](https://badge.fury.io/py/langfuse-mcp.svg)](https://badge.fury.io/py/langfuse-mcp)
+[![Downloads](https://static.pepy.tech/badge/langfuse-mcp)](https://pepy.tech/projects/langfuse-mcp)
 [![Python 3.10–3.13](https://img.shields.io/badge/python-3.10–3.13-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -17,9 +18,11 @@ Comparison with [official Langfuse MCP](https://github.com/langfuse/mcp-server-l
 | **Exception Tracking** | Yes | No |
 | **Prompt Management** | Yes | Yes |
 | **Dataset Management** | Yes | No |
+| **Annotation Queues** | Yes | No |
+| **Scores (v2)** | Yes | No |
 | **Selective Tool Loading** | Yes | No |
 
-This project provides a **full observability toolkit** — traces, observations, sessions, exceptions, and prompts — while the official MCP focuses on prompt management.
+This project provides a **full observability toolkit** — traces, observations, sessions, exceptions, prompts, datasets, annotation queues, and scores — while the official MCP focuses on prompt management.
 
 ## Quick Start
 

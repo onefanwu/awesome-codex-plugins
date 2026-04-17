@@ -274,6 +274,39 @@ def check_diff_pair_routing(sch: dict, pcb: dict) -> list[dict]:
         else:
             entry["status"] = "pass"
 
+        # Intra-pair skew: P vs N trace length within same pair
+        # (tighter than the inter-pair length tolerance above)
+        _intra_pair_tolerance = {
+            "USB": 1.0,
+            "Ethernet": 2.0,
+            "HDMI": 0.5,
+            "LVDS": 0.5,
+            "MIPI": 0.5,
+            "PCIe": 1.0,
+            "SATA": 1.0,
+        }
+
+        intra_skew = delta  # same as abs(pos_len - neg_len) computed above
+        intra_tol = _intra_pair_tolerance.get(protocol, 1.0)
+        if intra_skew > intra_tol:
+            entry["intra_pair_skew"] = {
+                "skew_mm": round(intra_skew, 2),
+                "tolerance_mm": intra_tol,
+                "severity": "HIGH" if intra_skew > intra_tol * 2 else "MEDIUM",
+                "detail": (f"Differential pair {pos_net}/{neg_net} intra-pair "
+                           f"skew {intra_skew:.1f}mm exceeds {protocol} "
+                           f"tolerance ({intra_tol}mm)"),
+            }
+            # Upgrade entry status if the skew check is more severe
+            if entry["status"] == "pass":
+                entry["status"] = "warning"
+                entry["message"] = (f"{protocol} pair {pos_net}/{neg_net}: "
+                                    f"intra-pair skew {intra_skew:.1f}mm "
+                                    f"exceeds {intra_tol}mm tolerance")
+            elif (entry["status"] == "warning"
+                  and intra_skew > intra_tol * 2):
+                entry["status"] = "fail"
+
         # Layer check
         pos_layers = set(pos_data.get("layers", {}).keys())
         neg_layers = set(neg_data.get("layers", {}).keys())
@@ -298,7 +331,8 @@ def check_power_traces(sch: dict, pcb: dict) -> list[dict]:
     Matches regulator output rails against PCB power net routing data.
     Surfaces trace widths and total lengths for reviewer assessment.
     """
-    regulators = sch.get("signal_analysis", {}).get("power_regulators", [])
+    regulators = [f for f in sch.get("findings", [])
+                  if f.get("detector") == "detect_power_regulators"]
     if not regulators:
         return []
 
@@ -362,7 +396,8 @@ def check_decoupling_placement(sch: dict, pcb: dict) -> list[dict]:
     against PCB footprint positions. Uses PCB decoupling_placement data
     when available, otherwise computes distances from footprint coordinates.
     """
-    sch_decoupling = sch.get("signal_analysis", {}).get("decoupling_analysis", [])
+    sch_decoupling = [f for f in sch.get("findings", [])
+                      if f.get("detector") == "detect_decoupling"]
     if not sch_decoupling or not isinstance(sch_decoupling, list):
         return []
 
@@ -528,12 +563,18 @@ def check_thermal_vias(thermal: dict, pcb: dict) -> list[dict]:
     if not assessments:
         return []
 
-    # Build thermal pad via lookup from PCB
+    # Build thermal pad via lookup from PCB findings[].
+    # Thermal pad via entries have detector="analyze_thermal_pad_vias".
+    # KH-234: Keys are "component" and "via_count".
     via_lookup = {}
-    for tv in pcb.get("thermal_pad_vias", []):
-        ref = tv.get("component_ref", "")
+    for tv in pcb.get("findings", []):
+        if not isinstance(tv, dict):
+            continue
+        if tv.get("detector") != "analyze_thermal_pad_vias":
+            continue
+        ref = tv.get("component", "")
         if ref:
-            via_lookup[ref] = tv.get("count", 0)
+            via_lookup[ref] = tv.get("via_count", 0)
 
     results = []
     for a in assessments:

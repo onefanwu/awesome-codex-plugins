@@ -17,36 +17,32 @@
 
 ## Quick Start
 
-**1.** Install:
-
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yimwoo/codex-agenteam/main/install.sh | bash
 ```
 
-**2.** Restart Codex, go to **Plugins > Local Plugins**, and install AgenTeam.
-
-**3.** Initialize your team:
+Restart Codex, go to **Plugins > Local Plugins**, install AgenTeam, then:
 
 ```
 @ATeam build my team
 ```
 
+If the role picker does not show `@Architect`, `@Dev`, and the others right
+away, confirm the project has `.codex/agents/*.toml`, then open a new thread
+or restart Codex so it reloads workspace agents.
+
 ---
 
-## Usage
+## Your Team
 
-Once initialized, type `@` in Codex to see your full team:
-
-| Role | Mention | Responsibility |
-|------|---------|----------------|
-| Researcher | `@Researcher` | Investigates docs, trends, and prior art |
+| Role | Mention | Job |
+|------|---------|-----|
+| Researcher | `@Researcher` | Investigates docs, trends, prior art |
 | PM | `@Pm` | Prioritizes work, writes specs |
 | Architect | `@Architect` | Designs systems, identifies risks |
 | Dev | `@Dev` | Writes production code |
 | Qa | `@Qa` | Writes tests, catches regressions |
 | Reviewer | `@Reviewer` | Reviews for correctness and security |
-
-Talk to any role directly, or use `@ATeam` for the full pipeline:
 
 ```
 @Architect review this API design
@@ -54,29 +50,26 @@ Talk to any role directly, or use `@ATeam` for the full pipeline:
 @ATeam add user authentication
 ```
 
-```
-Researcher  ->  PM  ->  Architect  ->  Dev  ->  Qa  ->  Reviewer
-```
-
-Need a specialist? `@ATeam add a security auditor that focuses on OWASP top 10`
-
----
-
-## Why AgenTeam?
-
-Most AI coding tools give you one agent. AgenTeam gives you a team. Each role has a focused job, a scoped write area, and a place in the pipeline — less context confusion, safer parallel execution, and a workflow that mirrors how real teams operate.
-
-AgenTeam remembers what happened in previous runs. Each completed run's summary and lessons (verify failures, rework paths, gate decisions) are persisted and injected as context into future runs when relevant.
-
 ---
 
 ## Documentation
 
-- [**Setup & Installation**](docs/setup.md) -- prerequisites, install, update
-- [**Configuration**](docs/configuration.md) -- roles, isolation, profiles, migration
-- [**Pipeline & Profiles**](docs/pipeline.md) -- stages, gates, verification, resume
-- [**CLI Reference**](docs/cli.md) -- all commands and skills
-- [**HOTL Integration**](docs/hotl.md) -- structured execution with the HOTL plugin
+- [**Setup & Installation**](docs/setup.md) — prerequisites, install, update
+- [**Configuration**](docs/configuration.md) — roles, profiles, model routing, two-layer config
+- [**Pipeline & Profiles**](docs/pipeline.md) — stages, gates, verification, resume, CI repair
+- [**CLI Reference**](docs/cli.md) — all skills and runtime commands
+- [**HOTL Integration**](docs/hotl.md) — structured execution with the HOTL plugin
+
+## Governed Delivery Foundations
+
+AgenTeam 3.4 adds an optional governance foundation for teams handling larger
+features, multi-phase initiatives, or longer-lived delivery work. You can
+scaffold local assets with `agenteam-rt governed-bootstrap`, record structured
+decisions with `agenteam-rt decision append`, and evaluate starter tripwires
+with `agenteam-rt tripwire check`.
+
+These commands are additive. Existing quick fixes, POCs, and standard pipeline
+flows keep working the same way unless you choose to layer governance on top.
 
 ---
 

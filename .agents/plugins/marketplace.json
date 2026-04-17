@@ -341,6 +341,18 @@
       "category": "Tools & Integrations"
     },
     {
+      "name": "morning-ai",
+      "source": {
+        "source": "local",
+        "path": "./plugins/octo-patch/MorningAI"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Tools & Integrations"
+    },
+    {
       "name": "oc-codex-multi-auth",
       "source": {
         "source": "local",
