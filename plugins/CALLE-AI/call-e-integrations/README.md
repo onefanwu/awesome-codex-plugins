@@ -13,7 +13,7 @@ Add the Call-E Codex marketplace from the repository root:
 
 ```bash
 codex plugin marketplace add CALLE-AI/call-e-integrations \
-  --ref '@call-e/codex-plugin@0.1.1' \
+  --ref '@call-e/codex-plugin@0.1.4' \
   --sparse .agents/plugins \
   --sparse packages/codex-plugin/plugin
 ```
@@ -24,13 +24,18 @@ Open Codex, run `/plugins`, choose the `Call-E` marketplace, and install
 ## Authentication
 
 The plugin uses the repository-local CLI when available, then a global `calle`
-command when available, then falls back to `npx -y @call-e/cli@0.1.0`.
+command when available, then falls back to `npx -y @call-e/cli@0.3.0`.
 
 To authenticate before using the plugin:
 
 ```bash
-npx -y @call-e/cli@0.1.0 auth login
+npx -y @call-e/cli@0.3.0 auth login
 ```
+
+When `$calle` is invoked, the skill checks authorization first. If login is
+missing or expired, it runs blocking `calle auth login`, shows the brokered
+authorization link, and continues automatically after browser authorization
+completes.
 
 ## Safety
 

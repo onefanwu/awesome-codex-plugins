@@ -28,6 +28,7 @@ PLUGINS_ROOT = Path(__file__).parent.parent / "plugins"
 REQUEST_TIMEOUT_SECONDS = 60
 MAX_RETRIES = 3
 USER_AGENT = "awesome-codex-plugins-generator"
+RAW_DEFAULT_BRANCH_REF = "HEAD"
 OPTIONAL_PLUGIN_FILES = (
     "README.md",
     "SECURITY.md",
@@ -96,7 +97,7 @@ def parse_plugins(readme_path: Path) -> list[dict[str, str]]:
                 "description": plugin_match.group(5).strip(),
                 "category": current_category,
                 "source": "awesome-codex-plugins",
-                "install_url": f"https://raw.githubusercontent.com/{owner}/{repo}/main/.codex-plugin/plugin.json",
+                "install_url": f"https://raw.githubusercontent.com/{owner}/{repo}/{RAW_DEFAULT_BRANCH_REF}/.codex-plugin/plugin.json",
             }
         )
 
@@ -142,7 +143,10 @@ def build_raw_manifest_url(plugin: dict[str, str], plugin_root_relative: str) ->
     manifest_path = ".codex-plugin/plugin.json"
     if plugin_root_relative:
         manifest_path = f"{plugin_root_relative}/{manifest_path}"
-    return f"https://raw.githubusercontent.com/{plugin['owner']}/{plugin['repo']}/main/{manifest_path}"
+    return (
+        f"https://raw.githubusercontent.com/{plugin['owner']}/{plugin['repo']}/"
+        f"{RAW_DEFAULT_BRANCH_REF}/{manifest_path}"
+    )
 
 
 def add_recursive_selection(
