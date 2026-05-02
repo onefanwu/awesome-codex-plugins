@@ -221,6 +221,18 @@
       "category": "Development & Workflow"
     },
     {
+      "name": "writers-loop",
+      "source": {
+        "source": "local",
+        "path": "./plugins/xxsang/writers-loop"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Development & Workflow"
+    },
+    {
       "name": "amq-cli",
       "source": {
         "source": "local",

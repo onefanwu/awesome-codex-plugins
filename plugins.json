@@ -3,7 +3,7 @@
   "name": "awesome-codex-plugins",
   "version": "1.0.0",
   "last_updated": "2026-05-02",
-  "total": 52,
+  "total": 53,
   "categories": [
     "Development & Workflow",
     "Tools & Integrations"
@@ -188,6 +188,16 @@
       "category": "Development & Workflow",
       "source": "awesome-codex-plugins",
       "install_url": "https://raw.githubusercontent.com/dadwadw233/VibePortrait/HEAD/.codex-plugin/plugin.json"
+    },
+    {
+      "name": "Writer's Loop",
+      "url": "https://github.com/xxsang/writers-loop",
+      "owner": "xxsang",
+      "repo": "writers-loop",
+      "description": "Structured AI writing workflow for planning, critique, revision, translation, style distillation, and opt-in local preference learning.",
+      "category": "Development & Workflow",
+      "source": "awesome-codex-plugins",
+      "install_url": "https://raw.githubusercontent.com/xxsang/writers-loop/HEAD/.codex-plugin/plugin.json"
     },
     {
       "name": "Agent Message Queue",
